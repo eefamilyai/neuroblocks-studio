@@ -90,6 +90,7 @@ const TRAIN_FIELDS: Record<TrainSpec['algo'], [keyof TrainSpec, string][]> = {
     ['normObs', 'normalise inputs'],
     ['maxGradNorm', 'gradient clipping'],
   ],
+  custom: [['numEnvs', 'parallel worlds']],
   evolution: [
     ['numEnvs', 'parallel worlds'],
     ['population', 'brains per generation'],

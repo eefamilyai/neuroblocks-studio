@@ -181,7 +181,7 @@ export interface ActionAxis {
   labels: string[];
 }
 
-export type AlgoKind = 'ppo' | 'dqn' | 'reinforce' | 'evolution';
+export type AlgoKind = 'ppo' | 'dqn' | 'reinforce' | 'evolution' | 'custom';
 
 export interface TrainSpec {
   algo: AlgoKind;

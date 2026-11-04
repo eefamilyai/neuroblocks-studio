@@ -35,6 +35,7 @@ const METRICS: Record<string, [string, string, string, string][]> = {
     ['lr', 'Learning rate', '#a3e635', 'The step size of every update.'],
   ],
   evolution: [['mutationSigma', 'Mutation σ', '#f2b84b', 'Size of the random changes applied to children. Decays slowly so search becomes finer.']],
+  custom: [],
   bc: [
     ['loss', 'Imitation loss', '#f472b6', 'How surprised the network is by YOUR actions (cross-entropy). Lower = better copy.'],
     ['accuracy', 'Accuracy', '#3ccf8e', 'Fraction of your recorded actions the network now picks itself (1 = perfect copy). 100% often means overfitting.'],
@@ -267,6 +268,12 @@ export class TrainingPanel {
         let col = this.mcols.get(k);
         if (!col) this.mcols.set(k, (col = new Array(i).fill(NaN)));
         col.push(v);
+        // your own algorithm: a chart for every number it logs with ctx.log({...})
+        if (this.algo === 'custom' && k !== 'update' && !this.metricCharts.has(k) && this.metricCharts.size < 12) {
+          const c = new LineChart(k, 'Logged by your algorithm with ctx.log({ ... }).');
+          this.metricCharts.set(k, c);
+          this.metricHost.append(c.el);
+        }
       }
       for (const col of this.mcols.values()) if (col.length < i + 1) col.push(NaN);
     }
@@ -414,6 +421,13 @@ export class TrainingPanel {
       c.smoothing = key === 'epsilon' || key === 'mutationSigma' || key === 'lr' ? 0 : Math.min(this.smoothing, 0.8);
       c.setSeries([{ name: '', color, xs: this.mx, ys: this.mcols.get(key) ?? [] }]);
     }
+    if (this.algo === 'custom') {
+      let k = 0;
+      for (const [key, c] of this.metricCharts) {
+        c.smoothing = Math.min(this.smoothing, 0.6);
+        c.setSeries([{ name: '', color: PART_COLORS[k++ % PART_COLORS.length], xs: this.mx, ys: this.mcols.get(key) ?? [] }]);
+      }
+    }
     if (this.algo === 'evolution') {
       this.fitnessChart.smoothing = 0;
       this.fitnessChart.setSeries([
@@ -447,7 +461,7 @@ export class TrainingPanel {
     row('Best episode reward', Number.isFinite(best) ? fmt(best, 3) : '–');
     row('Success rate (last 100)', k ? `${(sr * 100).toFixed(0)}%` : '–');
     row('Updates to the brain', (this.metrics.at(-1)?.update ?? 0).toLocaleString());
-    if (Number.isFinite(this.lr)) row('Current learning rate', fmt(this.lr, 6));
+    if (Number.isFinite(this.lr) && this.algo !== 'custom' && this.algo !== 'evolution') row('Current learning rate', fmt(this.lr, 6));
   }
 
   /** mean reward & success over the last `k` episodes */

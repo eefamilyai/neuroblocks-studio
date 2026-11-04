@@ -175,3 +175,38 @@ test('world.add / world.wall / clearZone build the level from code', () => {
   assert(types.length === 1 && types[0] === 'coin', `objects: ${types.join(',')}`);
   assert(tr.rt.statics.length === getWorld().statics.length + 1, 'one extra wall');
 });
+
+test('your own algorithm: the REINFORCE template written in code mode learns', async () => {
+  const { CUSTOM_ALGO_TEMPLATE } = await import('../src/code/templates.ts');
+  const c = compileCode(CUSTOM_ALGO_TEMPLATE);
+  assert(c.errors.length === 0, c.errors.join(' | '));
+  assert(c.spec.train.algo === 'custom' && c.spec.train.numEnvs === 16, `algo ${c.spec.train.algo}`);
+  const errs: string[] = [];
+  const tr = new Trainer({ spec: c.spec, world: getWorld(), onError: (e) => errs.push(e) });
+  const t0 = performance.now();
+  while (tr.totalSteps < 120000) tr.runFor(200);
+  const eps = tr.algo.stats.episodes.slice(-100);
+  const sr = eps.filter((e) => e.success).length / Math.max(1, eps.length);
+  const m = tr.algo.stats.metrics.at(-1);
+  console.log(`      success ${(sr * 100).toFixed(0)}% after ${tr.totalSteps} steps, ${tr.algo.updates} updates, ${((performance.now() - t0) / 1000).toFixed(1)} s, last metrics ${JSON.stringify(m)}`);
+  assert(errs.length === 0, errs.join(' | '));
+  assert(sr > 0.5, `success only ${sr}`);
+  const snap = tr.snapshot();
+  assert(snap.algo === 'custom' && snap.kind === 'policy' && snap.net.inSize === c.obsSize, 'snapshot');
+});
+
+test('errors inside a custom algorithm name the function and line', () => {
+  const src = "sense.target('flag'); act.move();\ntrain.custom({\n  setup(ctx) { this.policy = ctx.mlp([8]); },\n  act(obs, ctx) { return ctx.sample(this.policy.forward(obs)); },\n  update(ctx) {\n    nope();\n  },\n});\n";
+  const c = compileCode(src);
+  assert(c.errors.length === 0, c.errors.join(' | '));
+  const tr = new Trainer({ spec: c.spec, world: getWorld() });
+  let msg = '';
+  try {
+    tr.runFor(20);
+  } catch (e) {
+    msg = (e as Error).message;
+  }
+  assert(msg.includes('update()') && msg.includes('line 6'), `got: ${msg}`);
+  const bad = compileCode("sense.target('flag'); act.move();\ntrain.custom({ act() { return 0; } });\n");
+  assert(bad.errors.some((e) => e.includes('update')), bad.errors.join(' | '));
+});

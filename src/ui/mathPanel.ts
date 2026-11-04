@@ -115,6 +115,30 @@ export class MathPanel {
           P('Evolution explores by changing the BRAIN, while PPO/REINFORCE explore by randomising ACTIONS. That is why evolved robots act deterministically.'),
         );
         break;
+      case 'custom': {
+        const keys = h('div', { class: 'kv' });
+        this.body.append(
+          h('h3', null, 'Your own algorithm'),
+          P('This brain is trained by YOUR code in train.custom({...}): setup() builds the networks, act() picks actions, observe() sees every transition and update() changes the weights.'),
+          P('The toolkit does the heavy lifting with the same from-scratch library as PPO: ', h('b', null, 'net.forward'), ' (the forward pass), ', h('b', null, 'net.backward'), ' (backpropagation of ∂loss/∂outputs), and an optimizer step. For a policy gradient, ∂log π(a|s)/∂logits is simply:'),
+          F('∂ log softmax(z)ₐ / ∂zᵢ  =  [i = a] − pᵢ        (ctx.addLogProbGrad)'),
+          P('Numbers your algorithm logged with ctx.log({...}) at the last update:'),
+          keys,
+        );
+        this.stages.push({
+          el: keys,
+          on: () => {
+            const k = JSON.stringify(Object.keys(this.info));
+            if (keys.dataset.k !== k) {
+              keys.dataset.k = k;
+              clear(keys);
+              for (const name of Object.keys(this.info)) keys.append(h('span', null, name), live(name, 4));
+            }
+            return false;
+          },
+        });
+        break;
+      }
       case 'bc':
         this.body.append(
           h('h3', null, 'Behaviour cloning (supervised learning)'),

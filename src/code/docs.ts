@@ -13,7 +13,7 @@ export interface DocEntry {
   snippet?: string;
 }
 
-export const DOC_GROUPS = ['Robot', 'Senses', 'Actions', 'Brain', 'Training', 'World', 'Events', 'api: rewards & episode', 'api: measuring', 'api: objects & world', 'JavaScript'];
+export const DOC_GROUPS = ['Robot', 'Senses', 'Actions', 'Brain', 'Training', 'World', 'Events', 'api: rewards & episode', 'api: measuring', 'api: objects & world', 'Your own algorithm', 'JavaScript'];
 
 export const DOCS: DocEntry[] = [
   // ---- robot
@@ -48,6 +48,7 @@ export const DOCS: DocEntry[] = [
   { group: 'Training', name: 'train.dqn', sig: '({ lr, gamma, bufferSize, batchSize, epsStart, epsEnd, epsDecay, targetUpdate, learnStart, trainEvery, double, … })', doc: 'Deep Q-Network: learns the value of every action combination. Discrete actions only.', snippet: 'train.dqn({ lr: ${5e-4} });' },
   { group: 'Training', name: 'train.reinforce', sig: '({ lr, gamma, episodesPerUpdate, baseline, entropy, … })', doc: 'Vanilla policy gradient on whole episodes.', snippet: 'train.reinforce({ lr: ${1e-3} });' },
   { group: 'Training', name: 'train.evolution', sig: '({ population, eliteFrac, mutation, mutationDecay, episodesPerEval, … })', doc: 'Neuroevolution: a genetic algorithm, no gradients.', snippet: 'train.evolution({ population: ${48} });' },
+  { group: 'Training', name: 'train.custom', sig: '({ setup, act, observe, update, numEnvs, … })', doc: 'Your OWN learning algorithm. setup(ctx) builds this.policy (the brain), act(obs, ctx) returns a choice per action, observe(t, ctx) sees every transition, update(ctx) learns (return true when the brain changed). See "New code project: your own algorithm" for a full REINFORCE.', snippet: 'train.custom({\n  numEnvs: 16,\n  setup(ctx) {\n    this.policy = ctx.mlp([32, 32], \'tanh\');\n    this.opt = ctx.adam(this.policy, 0.003);\n  },\n  act(obs, ctx) {\n    return ctx.sample(this.policy.forward(obs));\n  },\n  observe(t, ctx) {\n    ${}\n  },\n  update(ctx) {\n    return false;\n  },\n});' },
   // ---- world
   { group: 'World', name: 'world.physics', sig: '({ gravity, friction, airDrag, npcSpeed, kickPower, ballMass, crateMass, bounce, decisionTicks })', doc: 'Change the physics of the training worlds. decisionTicks = physics ticks (1/60 s) between brain decisions (3 = 20 decisions per second).', snippet: 'world.physics({ gravity: ${9.8} });' },
   { group: 'World', name: 'world.add', sig: "(type, { x, z, y })", doc: 'Place an object: coin, flag, trophy, ball, crate, pad, runner, chaser or checkpoint (checkpoints take an index).', snippet: "world.add('${coin}', { x: ${-28}, z: ${4} });" },
@@ -113,6 +114,28 @@ export const DOCS: DocEntry[] = [
   { group: 'api: objects & world', name: 'api.laps', sig: '()', doc: 'Laps completed (race track).' },
   { group: 'api: objects & world', name: 'api.addCounter', sig: '(name, n)', doc: 'Add n to a named counter (reset every episode).', snippet: "api.addCounter('${coins}', 1);" },
   { group: 'api: objects & world', name: 'api.counter', sig: '(name)', doc: 'Read a named counter.', snippet: "api.counter('${coins}')" },
+  // ---- your own algorithm
+  { group: 'Your own algorithm', name: 'ctx.mlp', sig: "(hidden, activation, outSize?, inSize?)", doc: 'A new neural network. By default obs → hidden layers → one logit per choice (the right shape for this.policy). Pass outSize 1 for a critic/value network.', snippet: "ctx.mlp([${32}, ${32}], '${tanh}')" },
+  { group: 'Your own algorithm', name: 'ctx.adam', sig: '(net, lr)', doc: 'An Adam optimizer for a network. opt.step() applies the gradients; opt.lr can be changed any time.', snippet: 'ctx.adam(${this.policy}, ${0.003})' },
+  { group: 'Your own algorithm', name: 'ctx.sgd', sig: '(net, lr)', doc: 'Plain gradient descent: w ← w − lr·g.', snippet: 'ctx.sgd(${this.policy}, ${0.01})' },
+  { group: 'Your own algorithm', name: 'ctx.optimizer', sig: "(net, lr, kind)", doc: "Any optimizer: 'adam', 'sgd', 'momentum' or 'rmsprop'." },
+  { group: 'Your own algorithm', name: 'ctx.sample', sig: '(logits, row?)', doc: 'Pick one choice per action, at random, with softmax probabilities.', snippet: 'ctx.sample(${logits})' },
+  { group: 'Your own algorithm', name: 'ctx.best', sig: '(logits, row?)', doc: 'The most likely choice per action (no randomness).', snippet: 'ctx.best(${logits})' },
+  { group: 'Your own algorithm', name: 'ctx.probs', sig: '(logits, row?)', doc: 'Softmax probabilities, one array per action.' },
+  { group: 'Your own algorithm', name: 'ctx.logProb', sig: '(logits, action, row?)', doc: 'log π(a|s): the log-probability of an action (summed over the actions).' },
+  { group: 'Your own algorithm', name: 'ctx.entropy', sig: '(logits, row?)', doc: 'How random the policy is in that state.' },
+  { group: 'Your own algorithm', name: 'ctx.addLogProbGrad', sig: '(logits, row, action, scale, out)', doc: 'Adds scale · ∂log π(a|s)/∂logits = scale · (onehot(a) − p) into out (for a batch: row i of n). The heart of every policy-gradient method.', snippet: 'ctx.addLogProbGrad(${logits}, ${i}, ${action}, ${scale}, ${dLogits});' },
+  { group: 'Your own algorithm', name: 'ctx.addEntropyGrad', sig: '(logits, row, scale, out)', doc: 'Adds scale · ∂H/∂logits: use a negative scale in a loss to reward exploring.' },
+  { group: 'Your own algorithm', name: 'ctx.batch', sig: '([obs, obs, …])', doc: 'Stack observations into one array for a batched forward pass: net.forward(ctx.batch(list), list.length).', snippet: 'ctx.batch(${rows})' },
+  { group: 'Your own algorithm', name: 'ctx.clipGrad', sig: '(net, maxNorm)', doc: 'Gradient clipping: shrink the gradient if it is longer than maxNorm. Returns the norm before clipping.', snippet: 'ctx.clipGrad(${this.policy}, ${0.5});' },
+  { group: 'Your own algorithm', name: 'ctx.worlds', sig: '(() => value)', doc: 'One value per parallel world, e.g. ctx.worlds(() => []) for an episode buffer each.', snippet: 'ctx.worlds(() => ${[]})' },
+  { group: 'Your own algorithm', name: 'ctx.log', sig: '({ name: number, … })', doc: 'Record numbers: each one gets a chart in the Training tab and shows up in the Math tab.', snippet: 'ctx.log({ ${loss}: ${0} });' },
+  { group: 'Your own algorithm', name: 'ctx.random', sig: '()', doc: 'A random number in [0, 1) (seeded: runs are reproducible). Also ctx.gauss() and ctx.randint(n).' },
+  { group: 'Your own algorithm', name: 'ctx.obsSize', sig: '', doc: 'How many numbers each observation has. Also ctx.outputs (logits), ctx.branches (choices per action), ctx.actions (names), ctx.numEnvs, ctx.steps.' },
+  { group: 'Your own algorithm', name: 'net.forward', sig: '(x, batch = 1)', doc: 'Run the network on batch inputs laid out one after another. Returns a new Float32Array of batch × outputs.' },
+  { group: 'Your own algorithm', name: 'net.backward', sig: '(dOut, batch)', doc: 'Backpropagation: given ∂loss/∂outputs for the batch of the LAST forward call, add ∂loss/∂weights to the gradients. Call net.zeroGrad() first, then opt.step().' },
+  { group: 'Your own algorithm', name: 'net.zeroGrad', sig: '()', doc: 'Reset the accumulated gradients to 0.' },
+  { group: 'Your own algorithm', name: 'net.copyFrom', sig: '(other)', doc: 'Copy the weights of another network of the same shape (e.g. a DQN target network). net.clone() makes a copy.' },
   // ---- JS
   { group: 'JavaScript', name: 'let / const', sig: '', doc: 'Variables at the top level are shared by all events of one world and survive between episodes (reset them in on.start if needed).' },
   { group: 'JavaScript', name: 'Math', sig: '', doc: 'Math.abs, Math.min, Math.max, Math.sqrt, Math.exp, Math.log, Math.sin, Math.cos, Math.atan2, Math.hypot, Math.PI… (avoid Math.random: use api.random for reproducible training).' },

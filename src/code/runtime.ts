@@ -46,7 +46,7 @@ const TOUCH_TAGS: string[] = [...OBJ_TYPES, ...STATIC_TAGS];
 // ---------------------------------------------------------------------------
 const ENV_PRELUDE = [
   'var __nb = function () { return __nb; };',
-  'var robot = __nb, brain = { layer: __nb, layers: __nb }, train = { ppo: __nb, dqn: __nb, reinforce: __nb, evolution: __nb };',
+  'var robot = __nb, brain = { layer: __nb, layers: __nb }, train = { ppo: __nb, dqn: __nb, reinforce: __nb, evolution: __nb, custom: function (d) { S.algo = d; return train; } };',
   'var world = { physics: __nb, add: __nb, wall: __nb, clearZone: __nb };',
   'var act = { move: __nb, turn: __nb, strafe: __nb, jump: __nb, kick: __nb };',
   'var actions = function () { return actions; }; actions.discrete = actions; actions.continuous = actions;',
@@ -425,7 +425,23 @@ export function compileCode(source: string, customObjects: ObjDef[] = []): Compi
     spec.train = t;
     return train;
   };
-  const train = { ppo: trainWith('ppo'), dqn: trainWith('dqn'), reinforce: trainWith('reinforce'), evolution: trainWith('evolution') };
+  const custom = (def: unknown) => {
+    trainCalls++;
+    const d = obj(def, 'train.custom()');
+    for (const k of ['act', 'update']) if (typeof d[k] !== 'function') report('error', `train.custom({...}) needs a ${k}(…) function. See the "your own algorithm" template.`);
+    if (d.setup !== undefined && typeof d.setup !== 'function') report('error', 'train.custom: setup should be a function.');
+    if (d.observe !== undefined && typeof d.observe !== 'function') report('error', 'train.custom: observe should be a function.');
+    const t = defaultTrain('custom');
+    // the numbers the studio itself uses; any other keys are yours (e.g. this.gamma)
+    for (const k of ['numEnvs', 'envs', 'seed', 'stopSteps', 'targetSuccess', 'targetReward', 'stopMinutes']) {
+      if (d[k] === undefined) continue;
+      const def2 = TRAIN_KEYS[k];
+      (t as unknown as Record<string, number>)[def2.key] = num(d[k], t[def2.key] as number, def2.lo ?? -Infinity, def2.hi ?? Infinity, k, def2.int);
+    }
+    spec.train = t;
+    return train;
+  };
+  const train = { ppo: trainWith('ppo'), dqn: trainWith('dqn'), reinforce: trainWith('reinforce'), evolution: trainWith('evolution'), custom };
 
   const placeable: ObjType[] = ['coin', 'flag', 'trophy', 'ball', 'crate', 'pad', 'runner', 'chaser', 'checkpoint'];
   const wallTags: CustomWall['tag'][] = ['wall', 'ramp', 'lava', 'ice', 'bouncy', 'spike'];
@@ -527,12 +543,14 @@ export function compileCode(source: string, customObjects: ObjDef[] = []): Compi
     if (!spec.sensors.length) report('error', 'Your robot has no senses: add at least one, e.g. sense.target("flag").', null);
     if (!spec.axes.length) report('error', 'Your robot cannot do anything: add actions, e.g. act.move(); act.turn().', null);
     if (!spec.brain.layers.length) {
-      warnings.push('No brain layers: using one layer of 32 tanh neurons.');
+      // with train.custom the program builds its own networks in setup()
+      if (spec.train.algo !== 'custom') warnings.push('No brain layers: using one layer of 32 tanh neurons.');
       spec.brain.layers.push({ units: 32, activation: 'tanh' });
     }
     if (!trainCalls) warnings.push('No train.xxx() call: using PPO with default settings.');
     if (trainCalls > 1) warnings.push('train.xxx() was called more than once: the last call wins.');
     if (spec.train.algo === 'dqn' && spec.actionMode === 'continuous') report('error', 'DQN needs discrete actions: use actions.discrete() or train.ppo().', null);
+    if (spec.train.algo === 'custom' && spec.actionMode === 'continuous') report('error', 'train.custom works with discrete actions: use actions.discrete().', null);
     const z = world.zones.find((q) => q.id === spec.zone);
     if (z?.needsJump && !spec.axes.some((a) => a.axis === 'jump')) warnings.push(`${z.emoji} ${z.name} has gaps: your robot probably needs act.jump().`);
     const handlers = Object.values(handlerCounts).reduce((a, b) => a + b, 0);

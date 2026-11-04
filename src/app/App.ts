@@ -7,6 +7,7 @@ import type { CompileResult } from '../blocks/compiler.ts';
 import { MISSIONS, getMission } from '../blocks/missions.ts';
 import type { Mission } from '../blocks/missions.ts';
 import { blocksToCode, CODE_TEMPLATE } from '../code/fromBlocks.ts';
+import { CUSTOM_ALGO_TEMPLATE } from '../code/templates.ts';
 import { DOCS, DOC_GROUPS } from '../code/docs.ts';
 import type { CodeEditor } from './codeEditor.ts';
 import { WorldRuntime, editsKey, mergeEdits } from '../sim/runtime.ts';
@@ -460,6 +461,8 @@ export class App {
   private snapFits(s: BrainSnapshot, spec: AgentSpec): boolean {
     const L = obsLayout(spec);
     if (s.net.inSize !== L.size) return false;
+    // your own algorithm builds its own network: only the inputs and outputs have to match
+    if (spec.train.algo === 'custom') return s.kind === 'policy' && s.space.kind === 'discrete' && s.net.layers[s.net.layers.length - 1].outSize === this.outSizeFor(spec);
     if ((s.kind === 'q') !== (spec.train.algo === 'dqn')) return false;
     if (s.net.layers[s.net.layers.length - 1].outSize !== this.outSizeFor(spec)) return false;
     if ((s.space.kind === 'continuous') !== (spec.actionMode === 'continuous')) return false;
@@ -1002,6 +1005,7 @@ export class App {
         { heading: 'Project' },
         { label: 'New blocks project', icon: 'blocks', action: () => void this.newProject('blocks') },
         { label: 'New code project', icon: 'code', action: () => void this.newProject('code') },
+        { label: 'New code project: your own algorithm', icon: 'flask', action: () => void this.newProject('algo') },
         { label: 'Missions…', icon: 'target', action: () => this.openMissions() },
         'sep',
         { label: 'Open…', icon: 'open', hint: '.json', action: () => void this.openProjectFile() },
@@ -1218,7 +1222,7 @@ export class App {
     this.scheduleAutosave();
   }
 
-  private async newProject(kind: 'blocks' | 'code'): Promise<void> {
+  private async newProject(kind: 'blocks' | 'code' | 'algo'): Promise<void> {
     if (kind === 'blocks') {
       this.loadMission(getMission('blank')!);
       if (this.editorMode !== 'blocks') await this.setEditorMode('blocks', { quiet: true });
@@ -1227,15 +1231,15 @@ export class App {
     if (this.state !== 'idle') this.stopTraining(true);
     this.loadMission(getMission('reach-flag')!, true);
     this.missionId = null;
-    this.code = CODE_TEMPLATE;
+    this.code = kind === 'algo' ? CUSTOM_ALGO_TEMPLATE : CODE_TEMPLATE;
     this.codeEdited = true;
     this.codeTrusted = true;
-    this.setProjectName('My code robot');
+    this.setProjectName(kind === 'algo' ? 'My own algorithm' : 'My code robot');
     this.editorMode = 'blocks';
     await this.setEditorMode('code', { quiet: true });
     this.codeEditor?.setValue(this.code);
     this.compile();
-    this.log('New code project: a robot that learns to reach the flag, written in JavaScript. Press Train, then change it!', 'learn');
+    this.log(kind === 'algo' ? 'Your own learning algorithm: REINFORCE written from scratch in train.custom(...). Press Train, watch it learn, then change the maths!' : 'New code project: a robot that learns to reach the flag, written in JavaScript. Press Train, then change it!', 'learn');
   }
 
   private setProjectName(n: string): void {

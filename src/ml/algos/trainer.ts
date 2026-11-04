@@ -16,6 +16,7 @@ import { DQN } from './dqn.ts';
 import { Reinforce } from './reinforce.ts';
 import { Evolution } from './evolution.ts';
 import { BehaviorCloning } from './bc.ts';
+import { CustomAlgo } from './custom.ts';
 import type { DemoSet } from './bc.ts';
 
 export interface TrainerOptions {
@@ -67,6 +68,9 @@ export class Trainer {
           break;
         case 'evolution':
           this.algo = new Evolution(this.vec, o.spec, space, o.init ?? null);
+          break;
+        case 'custom':
+          this.algo = new CustomAlgo(this.vec, o.spec, space, this.factory, o.init ?? null);
           break;
         default:
           this.algo = new PPO(this.vec, o.spec, space, o.init ?? null);
