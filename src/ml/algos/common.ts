@@ -19,6 +19,8 @@ export interface EpisodeRecord {
   reward: number;
   length: number;
   success: boolean;
+  /** reward per label (api.reward(x, label)), for the reward-breakdown chart */
+  parts?: Record<string, number>;
 }
 
 export interface MetricPoint {
@@ -94,7 +96,7 @@ export class VecEnv {
       if (e.done) {
         this.termObs.set(e.obs, i * S);
         this.totalSteps++;
-        if (this.onEpisode) this.onEpisode({ step: this.totalSteps, reward: e.epReturn, length: e.steps, success: e.success }, i);
+        if (this.onEpisode) this.onEpisode({ step: this.totalSteps, reward: e.epReturn, length: e.steps, success: e.success, parts: e.epParts }, i);
         this.obs.set(e.reset(), i * S);
       } else {
         this.totalSteps++;
@@ -126,6 +128,7 @@ export class StatsLog {
   episodeCount = 0;
   successCount = 0;
   recentRewards: number[] = [];
+  recentSuccess: boolean[] = [];
   bestMean = -Infinity;
 
   addEpisode(r: EpisodeRecord): void {
@@ -134,6 +137,8 @@ export class StatsLog {
     if (r.success) this.successCount++;
     this.recentRewards.push(r.reward);
     if (this.recentRewards.length > 100) this.recentRewards.shift();
+    this.recentSuccess.push(r.success);
+    if (this.recentSuccess.length > 100) this.recentSuccess.shift();
     // keep memory bounded
     if (this.episodes.length > 20000) {
       this.episodes.splice(0, 10000);
@@ -147,6 +152,15 @@ export class StatsLog {
       this.metrics.splice(0, 10000);
       this.mCursor = Math.max(0, this.mCursor - 10000);
     }
+  }
+
+  /** success rate over the last 100 episodes */
+  successRecent(): number {
+    const r = this.recentSuccess;
+    if (!r.length) return 0;
+    let n = 0;
+    for (const v of r) if (v) n++;
+    return n / r.length;
   }
 
   meanRecent(): number {
@@ -176,6 +190,8 @@ export interface Algorithm {
   updates: number;
   /** optional: algorithms with a natural end (behaviour cloning) */
   finished?(): boolean;
+  /** optional: change the learning rate (used by learning-rate schedules) */
+  setLearningRate?(lr: number): void;
 }
 
 /**

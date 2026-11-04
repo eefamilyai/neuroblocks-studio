@@ -4,22 +4,29 @@
  */
 import { compileStatic, StaticGrid } from './geom.ts';
 import type { Collider } from './geom.ts';
-import type { ObjDef, StaticDef, WorldDef, ZoneDef, Rect } from './types.ts';
+import type { AgentSpec, CustomWall, ObjDef, StaticDef, WorldDef, ZoneDef, Rect } from './types.ts';
 import { rotYawPitch } from './geom.ts';
 
-export interface CustomWall {
-  x: number;
-  z: number;
-  w: number;
-  d: number;
-  h: number;
-  yaw: number;
-  tag: 'wall' | 'lava' | 'ice' | 'bouncy' | 'ramp' | 'spike';
-}
+export type { CustomWall } from './types.ts';
 
 export interface WorldEdits {
   objects: ObjDef[];
   walls: CustomWall[];
+  /** zones whose built-in objects are removed (a blank canvas to build on) */
+  hidden?: string[];
+}
+
+/** Build-mode edits plus the world changes a program makes itself. */
+export function mergeEdits(edits: WorldEdits | undefined | null, spec: Pick<AgentSpec, 'world'> | null | undefined): WorldEdits {
+  const e: WorldEdits = edits ?? { objects: [], walls: [] };
+  const w = spec?.world;
+  if (!w || (!w.objects.length && !w.walls.length && !w.clearZones.length)) return e;
+  return { objects: [...e.objects, ...w.objects], walls: [...e.walls, ...w.walls], hidden: [...(e.hidden ?? []), ...w.clearZones] };
+}
+
+/** A key that changes whenever the merged world changes (to know when to rebuild). */
+export function editsKey(e: WorldEdits): string {
+  return JSON.stringify([e.objects, e.walls, e.hidden ?? []]);
 }
 
 export function customWallToStatic(w: CustomWall, zone: string): StaticDef {
@@ -71,8 +78,9 @@ export class WorldRuntime {
     this.edits = edits;
     const customStatics = edits.walls.map((w) => customWallToStatic(w, zoneAt(def, w.x, w.z)));
     this.statics = [...def.statics, ...customStatics];
+    const hidden = new Set(edits.hidden ?? []);
     this.objects = [
-      ...def.objects,
+      ...def.objects.filter((o) => !hidden.has(o.zone)),
       ...edits.objects.map((o) => ({ ...o, zone: zoneAt(def, o.x, o.z), custom: true })),
     ];
     this.colliders = this.statics.map((s, i) => compileStatic(s, i));

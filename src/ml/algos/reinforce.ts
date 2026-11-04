@@ -100,6 +100,11 @@ export class Reinforce implements Algorithm {
     } else dst.set(src.subarray(0, n * this.S));
   }
 
+  setLearningRate(lr: number): void {
+    this.optA.lr = lr;
+    if (this.optC) this.optC.lr = lr * 3;
+  }
+
   work(): void {
     const tr = this.spec.train;
     if (this.episodesInBatch >= Math.max(1, tr.episodesPerUpdate)) {

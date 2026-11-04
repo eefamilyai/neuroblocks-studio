@@ -4,6 +4,7 @@
  * config-reading compiler in compiler.ts.
  */
 import Blockly from './blockly.ts';
+import type * as BT from 'blockly/core';
 import { buildWorld } from '../sim/worldgen.ts';
 
 export const COLORS = {
@@ -132,6 +133,32 @@ export function zoneOptions(): Opt[] {
 const num = (name: string, value: number, min?: number, max?: number, precision?: number) => ({ type: 'field_number', name, value, min, max, precision });
 const dd = (name: string, options: Opt[]) => ({ type: 'field_dropdown', name, options });
 const chk = (name: string, checked: boolean) => ({ type: 'field_checkbox', name, checked });
+/** the "advanced" slot inside every training block */
+const MORE = { type: 'input_statement', name: 'MORE', check: 'nb_train_opt' };
+
+/** physics settings: label, key, default value */
+export const PHYS_OPTS: [string, string, number][] = [
+  ['🌍 gravity (m/s²)', 'gravity', 22],
+  ['🧲 ground friction', 'friction', 3.2],
+  ['💨 air drag', 'airDrag', 0.25],
+  ['🐰 bot speed ×', 'npcSpeed', 1],
+  ['🦵 kick power ×', 'kickPower', 1],
+  ['⚽ ball mass (kg)', 'ballMass', 0.45],
+  ['📦 crate mass (kg)', 'crateMass', 2.5],
+  ['🟣 bounce-pad power', 'bounce', 12],
+  ['🧠 brain decides every N ticks (60 = 1 s)', 'decisionTicks', 3],
+];
+export const TRAIN_OPT_OPTS: [string, string, number][] = [
+  ['🎲 entropy bonus at the end', 'entropyEnd', 0.001],
+  ['📏 value-loss weight (PPO)', 'valueCoef', 0.5],
+  ['✂️ max gradient norm', 'maxGradNorm', 0.5],
+  ['🔁 schedule length (steps)', 'scheduleSteps', 1000000],
+];
+export const STOP_OPTS: [string, string, number][] = [
+  ['success rate (%)', 'success', 95],
+  ['mean reward', 'reward', 10],
+  ['minutes trained', 'minutes', 5],
+];
 
 export function blockDefinitions(): object[] {
   const ZONES = zoneOptions();
@@ -197,6 +224,31 @@ export function blockDefinitions(): object[] {
       nextStatement: 'nb_trait',
       style: 'robot_blocks',
       tooltip: 'Just for looks.',
+    },
+    {
+      type: 'nb_clear_zone',
+      message0: '🧹 remove the zone\'s built-in objects',
+      previousStatement: 'nb_trait',
+      nextStatement: 'nb_trait',
+      style: 'robot_blocks',
+      tooltip: 'Start from an empty zone (walls stay): place your own objects in 🧱 Build mode or with code.',
+    },
+    {
+      type: 'nb_world',
+      message0: '🌍 world rules',
+      nextStatement: 'nb_phys',
+      style: 'robot_hat',
+      tooltip: 'Change the physics of every training world: gravity, friction, how often the brain decides…',
+    },
+    {
+      type: 'nb_phys',
+      message0: '%1 = %2',
+      args0: [dd('KEY', PHYS_OPTS.map(([l, k]) => [l, k] as Opt)), num('V', 22)],
+      previousStatement: 'nb_phys',
+      nextStatement: 'nb_phys',
+      style: 'robot_blocks',
+      extensions: ['nb_default_values'],
+      tooltip: 'A physics setting. Picking another setting resets the number to its normal value.',
     },
     // ------------------------------------------------------------- SENSES
     {
@@ -267,6 +319,15 @@ export function blockDefinitions(): object[] {
     },
     { type: 'nb_sense_time', message0: '⏱️ time left in the episode', previousStatement: 'nb_sense', nextStatement: 'nb_sense', style: 'senses_blocks', tooltip: '1 at the start, 0 when time runs out. 1 input.' },
     { type: 'nb_sense_last', message0: '↩️ my previous action', previousStatement: 'nb_sense', nextStatement: 'nb_sense', style: 'senses_blocks', tooltip: 'A short memory: what I did last step. 1 input per action.' },
+    {
+      type: 'nb_sense_memory',
+      message0: '🕘 remember the last %1 moments',
+      args0: [num('K', 3, 1, 8, 1)],
+      previousStatement: 'nb_sense',
+      nextStatement: 'nb_sense',
+      style: 'senses_blocks',
+      tooltip: 'Frame stacking: the brain also gets what it sensed 1, 2, … steps ago, so it can feel motion and remember things that went out of view. Multiplies the number of inputs.',
+    },
     {
       type: 'nb_sense_custom',
       message0: '✨ custom sense %1 = %2',
@@ -349,6 +410,8 @@ export function blockDefinitions(): object[] {
       args7: [dd('OPT', OPTIMIZER_OPTS), chk('NORMOBS', true), chk('NORMREW', true)],
       message8: '⏹️ stop after %1 steps (0 = never)   seed %2',
       args8: [num('STOP', 0, 0, 1e9, 1), num('SEED', 1, 0, 99999, 1)],
+      message9: 'advanced %1',
+      args9: [MORE],
       style: 'train_hat',
       tooltip: 'Proximal Policy Optimization: an actor-critic algorithm. The default choice for most robot tasks (used by OpenAI and Unity ML-Agents).',
     },
@@ -369,6 +432,8 @@ export function blockDefinitions(): object[] {
       args6: [num('LEARNSTART', 2000, 0, 1e7, 1), num('TRAINEVERY', 4, 1, 1000, 1)],
       message7: '⚙️ optimizer %1   ⏹️ stop after %2 steps   seed %3',
       args7: [dd('OPT', OPTIMIZER_OPTS), num('STOP', 0, 0, 1e9, 1), num('SEED', 1, 0, 99999, 1)],
+      message8: 'advanced %1',
+      args8: [MORE],
       style: 'train_hat',
       tooltip: 'Deep Q-Network: learns the value of every action and picks the best. Discrete actions only. Famous for learning Atari games.',
     },
@@ -385,6 +450,8 @@ export function blockDefinitions(): object[] {
       args4: [num('ENT', 0.01, 0, 1), chk('NORMOBS', true)],
       message5: '⚙️ optimizer %1   ⏹️ stop after %2 steps   seed %3',
       args5: [dd('OPT', OPTIMIZER_OPTS), num('STOP', 0, 0, 1e9, 1), num('SEED', 1, 0, 99999, 1)],
+      message6: 'advanced %1',
+      args6: [MORE],
       style: 'train_hat',
       tooltip: 'The simplest policy-gradient algorithm: play whole episodes, then make actions that led to high returns more likely.',
     },
@@ -401,8 +468,46 @@ export function blockDefinitions(): object[] {
       args4: [num('EVALS', 1, 1, 20, 1)],
       message5: '⏹️ stop after %1 steps   seed %2',
       args5: [num('STOP', 0, 0, 1e9, 1), num('SEED', 1, 0, 99999, 1)],
+      message6: 'advanced %1',
+      args6: [MORE],
       style: 'train_hat',
       tooltip: 'Natural selection for neural networks: no gradients, just mutate the best brains and keep the winners.',
+    },
+    {
+      type: 'nb_train_schedule',
+      message0: '📉 learning rate %1 down to %2 % of the start',
+      args0: [
+        dd('MODE', [
+          ['decays linearly', 'linear'],
+          ['decays smoothly (cosine)', 'cosine'],
+          ['stays constant', 'constant'],
+        ]),
+        num('END', 10, 0, 100),
+      ],
+      previousStatement: 'nb_train_opt',
+      nextStatement: 'nb_train_opt',
+      style: 'train_hat',
+      tooltip: 'A learning-rate schedule: big steps early, small careful steps later. The schedule runs until the stop limit (or 1M steps).',
+    },
+    {
+      type: 'nb_train_stop',
+      message0: '🏁 stop when %1 ≥ %2',
+      args0: [dd('WHAT', STOP_OPTS.map(([l, k]) => [l, k] as Opt)), num('V', 95)],
+      previousStatement: 'nb_train_opt',
+      nextStatement: 'nb_train_opt',
+      style: 'train_hat',
+      extensions: ['nb_default_values'],
+      tooltip: 'Stop training automatically when the goal is reached (measured over the last 100 episodes).',
+    },
+    {
+      type: 'nb_train_opt',
+      message0: '⚙️ %1 = %2',
+      args0: [dd('KEY', TRAIN_OPT_OPTS.map(([l, k]) => [l, k] as Opt)), num('V', 0.001)],
+      previousStatement: 'nb_train_opt',
+      nextStatement: 'nb_train_opt',
+      style: 'train_hat',
+      extensions: ['nb_default_values'],
+      tooltip: 'Fine-tune the learning algorithm.',
     },
     // ------------------------------------------------------------- EVENTS
     { type: 'nb_on_start', message0: '🎬 when an episode starts', nextStatement: null, style: 'event_hat', tooltip: 'Runs once at the start of every attempt. Great for scattering objects to random spots.' },
@@ -548,9 +653,31 @@ export function blockDefinitions(): object[] {
   ];
 }
 
+const DEFAULTS: Record<string, Record<string, number>> = {
+  nb_phys: Object.fromEntries(PHYS_OPTS.map(([, k, v]) => [k, v])),
+  nb_train_opt: Object.fromEntries(TRAIN_OPT_OPTS.map(([, k, v]) => [k, v])),
+  nb_train_stop: Object.fromEntries(STOP_OPTS.map(([, k, v]) => [k, v])),
+};
+
 let defined = false;
 export function defineBlocks(): void {
   if (defined) return;
   defined = true;
+  // "setting = value" blocks: when YOU pick another setting, the number resets to that setting's
+  // normal value (only for real edits: not while loading, undoing or in the palette)
+  if (!Blockly.Extensions.isRegistered('nb_default_values'))
+    Blockly.Extensions.register('nb_default_values', function (this: BT.Block) {
+      this.setOnChange(function (this: BT.Block, e: BT.Events.Abstract) {
+        if (e.type !== Blockly.Events.BLOCK_CHANGE || !e.recordUndo || this.isInFlyout) return;
+        const ce = e as BT.Events.BlockChange;
+        if (ce.blockId !== this.id || ce.element !== 'field' || (ce.name !== 'KEY' && ce.name !== 'WHAT')) return;
+        const v = DEFAULTS[this.type]?.[String(ce.newValue)];
+        if (v === undefined) return;
+        const g = Blockly.Events.getGroup();
+        Blockly.Events.setGroup(ce.group || true);
+        this.setFieldValue(v, 'V');
+        Blockly.Events.setGroup(g);
+      });
+    });
   Blockly.common.defineBlocksWithJsonArray(blockDefinitions());
 }

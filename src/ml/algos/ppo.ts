@@ -126,6 +126,11 @@ export class PPO implements Algorithm {
     vec.reset();
   }
 
+  setLearningRate(lr: number): void {
+    this.optA.lr = lr;
+    this.optC.lr = lr;
+  }
+
   private normalizeInto(src: Float32Array, dst: Float32Array, n: number, update: boolean): void {
     if (this.spec.train.normObs) {
       if (update) this.obsRms.update(src, n);

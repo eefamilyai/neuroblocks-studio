@@ -95,6 +95,10 @@ export class DQN implements Algorithm {
     vec.reset();
   }
 
+  setLearningRate(lr: number): void {
+    this.opt.lr = lr;
+  }
+
   work(): void {
     const tr = this.spec.train;
     if (this.pending >= 1 && this.size >= Math.max(tr.learnStart, tr.batchSize)) {

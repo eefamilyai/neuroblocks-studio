@@ -9,10 +9,11 @@
  * Physics runs at 60 Hz; the brain decides every 3 physics ticks (20 Hz).
  */
 import { RNG } from '../ml/rng.ts';
+import { describeScriptError } from './scriptErrors.ts';
 import { pointInYawBox, rayVsCollider, rayVsSphere, rayVsYawBox, sphereVsCollider, wrapAngle } from './geom.ts';
 import type { Collider, Contact } from './geom.ts';
-import type { AgentSpec, ObjType, Rect, SensorSpec, Tag, ZoneDef } from './types.ts';
-import { OBJ_TYPES, STATIC_TAGS } from './types.ts';
+import type { AgentSpec, ObjType, PhysicsSpec, Rect, SensorSpec, Tag, ZoneDef } from './types.ts';
+import { DEFAULT_PHYSICS, OBJ_TYPES, PHYSICS_LIMITS, STATIC_TAGS } from './types.ts';
 import type { WorldRuntime } from './runtime.ts';
 
 export const PHYS = {
@@ -38,6 +39,43 @@ export const PHYS = {
 };
 
 const DEG = Math.PI / 180;
+
+/** The physics settings for one spec: defaults + the program's overrides (clamped to sane ranges). */
+export function physicsOf(spec: AgentSpec): PhysicsSpec {
+  const p: PhysicsSpec = { ...DEFAULT_PHYSICS };
+  const o = spec.physics ?? {};
+  for (const k of Object.keys(DEFAULT_PHYSICS) as (keyof PhysicsSpec)[]) {
+    const v = Number(o[k]);
+    if (o[k] === undefined || !Number.isFinite(v)) continue;
+    const [lo, hi] = PHYSICS_LIMITS[k];
+    p[k] = Math.min(hi, Math.max(lo, v));
+  }
+  p.decisionTicks = Math.round(p.decisionTicks);
+  return p;
+}
+
+/** Runtime constants of one Env (PHYS with the spec's physics applied). */
+function envConstants(spec: AgentSpec): typeof PHYS & { kickPower: number; bounce: number } {
+  const p = physicsOf(spec);
+  return {
+    ...PHYS,
+    gravity: -p.gravity,
+    groundDrag: p.friction,
+    airDrag: p.airDrag,
+    runnerSpeed: PHYS.runnerSpeed * p.npcSpeed,
+    chaserSpeed: PHYS.chaserSpeed * p.npcSpeed,
+    ballMass: p.ballMass,
+    crateMass: p.crateMass,
+    substeps: p.decisionTicks,
+    kickPower: p.kickPower,
+    bounce: p.bounce,
+  };
+}
+
+export function frameStackOf(spec: AgentSpec): number {
+  const k = Math.round(Number(spec.frameStack ?? 1));
+  return Number.isFinite(k) ? Math.max(1, Math.min(8, k)) : 1;
+}
 
 /** All tags in a fixed order (index used for compact visualisation data). */
 export const ALL_TAGS: Tag[] = [...STATIC_TAGS, ...OBJ_TYPES];
@@ -117,6 +155,8 @@ export interface ObsLayout {
   size: number;
   labels: string[];
   groups: ObsGroup[];
+  /** size of one frame (= size unless frames are stacked) */
+  base: number;
 }
 
 const AXIS_NAME: Record<string, string> = { move: 'move', turn: 'turn', strafe: 'strafe', jump: 'jump', kick: 'kick' };
@@ -185,7 +225,15 @@ export function obsLayout(spec: AgentSpec): ObsLayout {
         break;
     }
   }
-  return { size: labels.length, labels, groups };
+  // frame stacking: the previous observations follow the current one
+  const base = labels.length;
+  const K = frameStackOf(spec);
+  const cur = labels.slice();
+  for (let f = 1; f < K; f++) {
+    const mem: SensorSpec = { kind: 'memory', frames: K, lag: f };
+    add(`🕘 Memory: ${f} step${f > 1 ? 's' : ''} ago`, mem, cur.map((l) => `${l} (t−${f})`));
+  }
+  return { size: labels.length, labels, groups, base };
 }
 
 // ---------------------------------------------------------------------------
@@ -221,6 +269,11 @@ export class Env {
   readonly layout: ObsLayout;
   readonly obs: Float32Array;
   readonly maxSteps: number;
+  /** physics constants for this run (PHYS + the program's physics settings) */
+  readonly P: ReturnType<typeof envConstants>;
+  private readonly frames: number;
+  /** reward collected this episode, per label (for the "where does the reward come from" chart) */
+  epParts: Record<string, number> = {};
 
   /** the robot */
   a: Body & { yaw: number } = { x: 0, y: 0.5, z: 0, vx: 0, vy: 0, vz: 0, yaw: 0 };
@@ -298,6 +351,8 @@ export class Env {
     this.skipGate = this.freeRoam ? (c: Collider) => c.gate : null;
     this.layout = obsLayout(spec);
     this.obs = new Float32Array(this.layout.size);
+    this.P = envConstants(spec);
+    this.frames = frameStackOf(spec);
     this.maxSteps = spec.maxSteps;
     this.lastActions = new Float32Array(spec.axes.length);
     const rays = spec.sensors.find((s) => s.kind === 'rays');
@@ -351,7 +406,7 @@ export class Env {
     try {
       this.handlers = (factory ?? EMPTY_FACTORY)(this.api, Math);
     } catch (e) {
-      this.reportError(`Script failed to start: ${(e as Error).message}`);
+      this.reportError(`Script failed to start: ${describeScriptError(e, spec)}`);
     }
   }
 
@@ -387,7 +442,8 @@ export class Env {
     for (const h of this.handlers.start) this.call(h);
     for (const key of this.tracked) this.prevD.set(key, this.measure(key));
     this.stepReward = 0;
-    this.observe();
+    this.epParts = {};
+    this.observe('reset');
     return this.obs;
   }
 
@@ -545,11 +601,11 @@ export class Env {
     this.kicked = Math.max(0, this.kicked - 1);
     const dt = PHYS.dt;
     if (this.kick > 0.5 && this.kickCd <= 0) this.doKick();
-    for (let s = 0; s < PHYS.substeps; s++) {
+    for (let s = 0; s < this.P.substeps; s++) {
       this.agentPhysics(dt);
       this.objectPhysics(dt);
     }
-    const T = dt * PHYS.substeps;
+    const T = dt * this.P.substeps;
     this.jumpCd -= T;
     this.kickCd -= T;
     if (this.a.y < PHYS.fallY) this.fell = true;
@@ -637,7 +693,8 @@ export class Env {
       (fn as (...a: unknown[]) => unknown)(...args);
     } catch (e) {
       this.dead.add(fn);
-      this.reportError(`Script error (block disabled): ${(e as Error).message}`);
+      const where = this.spec.source === 'code' ? 'Code error (that handler is switched off until you restart)' : 'Script error (block disabled)';
+      this.reportError(`${where}: ${describeScriptError(e, this.spec)}`);
     }
   }
 
@@ -670,7 +727,7 @@ export class Env {
       const d = Math.hypot(dx, dz);
       if (d > 1.9 || d < 1e-6) continue;
       if ((dx * fx + dz * fz) / d < 0.3) continue;
-      const power = o.type === 'ball' ? 10 : 3;
+      const power = (o.type === 'ball' ? 10 : 3) * this.P.kickPower;
       o.vx += fx * power;
       o.vz += fz * power;
       o.vy += o.type === 'ball' ? 2.5 : 0;
@@ -699,7 +756,7 @@ export class Env {
   private agentPhysics(dt: number): void {
     const a = this.a;
     const body = this.spec.body;
-    const P = PHYS;
+    const P = this.P;
     a.yaw = wrapAngle(a.yaw - this.turn * P.turnRate * body.turn * dt);
     const sy = Math.sin(a.yaw);
     const cy = Math.cos(a.yaw);
@@ -763,7 +820,7 @@ export class Env {
           this.gnz = c.nz;
         }
         if (col.tag === 'bouncy' && c.ny > 0.55) {
-          a.vy = 12;
+          a.vy = this.P.bounce;
           this.grounded = false;
         }
         this.touchStatic.add(col.tag);
@@ -852,11 +909,11 @@ export class Env {
       }
     }
     // n points from crate to sphere; resolve() wants a→b, so pass -n
-    this.resolve(a, wa, o, 1 / PHYS.crateMass, -dx, -dy, -dz, depth, 0.05, isAgent);
+    this.resolve(a, wa, o, 1 / this.P.crateMass, -dx, -dy, -dz, depth, 0.05, isAgent);
   }
 
   private objectPhysics(dt: number): void {
-    const g = PHYS.gravity;
+    const g = this.P.gravity;
     const c = this.contact;
     const ax = this.a.x;
     const az = this.a.z;
@@ -917,7 +974,7 @@ export class Env {
   }
 
   private massInv(o: ObjState): number {
-    return o.type === 'ball' ? 1 / PHYS.ballMass : o.type === 'crate' ? 1 / PHYS.crateMass : 1;
+    return o.type === 'ball' ? 1 / this.P.ballMass : o.type === 'crate' ? 1 / this.P.crateMass : 1;
   }
 
   private crateVsStatic(o: ObjState): void {
@@ -996,7 +1053,7 @@ export class Env {
     let speed: number;
     o.wander += this.rng.uniform(-0.25, 0.25);
     if (o.type === 'runner') {
-      speed = PHYS.runnerSpeed;
+      speed = this.P.runnerSpeed;
       if (d < 10) {
         const f = ((10 - d) / 10) * 3;
         wx += (dx / d) * f;
@@ -1005,7 +1062,7 @@ export class Env {
       wx += Math.sin(o.wander) * 0.7;
       wz += Math.cos(o.wander) * 0.7;
     } else {
-      speed = PHYS.chaserSpeed;
+      speed = this.P.chaserSpeed;
       if (o.stun > 0) {
         o.stun -= dt;
         return;
@@ -1212,12 +1269,21 @@ export class Env {
     return bestT <= maxT ? [bestT, bestTag] : [-1, -1];
   }
 
-  observe(): void {
+  /**
+   * Fill `obs` with what the robot senses now. With frame stacking the older
+   * frames are shifted back first ('step'), or all set to the current frame
+   * ('reset' / 'peek' = look without remembering).
+   */
+  observe(mode: 'step' | 'reset' | 'peek' = 'step'): void {
     const o = this.obs;
     const a = this.a;
+    const B = this.layout.base;
+    const K = this.frames;
+    if (K > 1 && mode === 'step') o.copyWithin(B, 0, B * (K - 1));
     let k = 0;
     for (const g of this.layout.groups) {
       const s = g.spec;
+      if (s.kind === 'memory') break;
       switch (s.kind) {
         case 'rays': {
           const n = s.count;
@@ -1346,7 +1412,7 @@ export class Env {
               v = Number(fn());
             } catch (e) {
               this.dead.add(fn);
-              this.reportError(`Custom sense "${s.name}" failed: ${(e as Error).message}`);
+              this.reportError(`Custom sense "${s.name}" failed: ${describeScriptError(e, this.spec)}`);
             }
           }
           o[k++] = Number.isFinite(v) ? clamp(v, -10, 10) : 0;
@@ -1354,6 +1420,7 @@ export class Env {
         }
       }
     }
+    if (K > 1 && mode !== 'step') for (let f = 1; f < K; f++) o.copyWithin(f * B, 0, B);
   }
 }
 
@@ -1371,9 +1438,94 @@ export class ScriptAPI {
   constructor(e: Env) {
     this.e = e;
   }
-  reward(x: number): void {
+  /** Give reward (negative = punishment). The optional label groups it in the reward-breakdown chart. */
+  reward(x: number, label?: string): void {
     const v = Number(x);
-    if (Number.isFinite(v)) this.e.stepReward += v;
+    if (!Number.isFinite(v) || v === 0) return;
+    this.e.stepReward += v;
+    const key = label === undefined || label === null || label === '' ? (v >= 0 ? 'reward' : 'penalty') : String(label).slice(0, 40);
+    const parts = this.e.epParts;
+    parts[key] = (parts[key] ?? 0) + v;
+  }
+  /** Same as reward(−x). */
+  penalty(x: number, label?: string): void {
+    this.reward(-Number(x), label ?? 'penalty');
+  }
+  /** How many metres closer I got to the nearest `tag` this step (negative = I moved away). */
+  closer(tag: string): number {
+    return -this.e.delta(tag);
+  }
+  /** How many metres closer thing `a` got to thing `b` this step. */
+  pairCloser(a: string, b: string): number {
+    return -this.e.delta(`pair:${a}:${b}`);
+  }
+  /** My position in metres: { x, y, z }. */
+  position(): { x: number; y: number; z: number } {
+    const a = this.e.a;
+    return { x: a.x, y: a.y, z: a.z };
+  }
+  /** My velocity in m/s: { x, y, z }. */
+  velocity(): { x: number; y: number; z: number } {
+    const a = this.e.a;
+    return { x: a.vx, y: a.vy, z: a.vz };
+  }
+  /** Compass heading in degrees: 0 = north (−z), 90 = east, clockwise. */
+  heading(): number {
+    const d = ((Math.PI - this.e.a.yaw) * 180) / Math.PI;
+    return ((d % 360) + 360) % 360;
+  }
+  /** The nearest `tag`: { x, y, z, dist, angle } (angle in degrees, + = to my right), or null. */
+  nearest(tag: string): { x: number; y: number; z: number; dist: number; angle: number } | null {
+    const n = this.e.nearest(tag);
+    if (!n) return null;
+    return { x: n[0], y: n[1], z: n[2], dist: n[3], angle: (this.e.relAngle(n[0], n[2]) * 180) / Math.PI };
+  }
+  /** Every object of a type (coin, ball, crate, …), including hidden ones (check `.active`). */
+  objects(tag?: string): ObjState[] {
+    return tag ? this.e.objs.filter((o) => o.type === tag) : this.e.objs.slice();
+  }
+  /** Cast a ray from my eyes: angle in degrees (0 = straight ahead, + = right). Returns { dist, tag } or null. */
+  ray(angleDeg = 0, range = 20): { dist: number; tag: string } | null {
+    const a = this.e.a;
+    const yr = a.yaw - (Number(angleDeg) * Math.PI) / 180;
+    const r = Math.max(0.5, Math.min(100, Number(range) || 20));
+    const [t, tagI] = this.e.castRay(a.x, a.y + 0.15, a.z, Math.sin(yr), 0, Math.cos(yr), r, null);
+    return t < 0 ? null : { dist: t, tag: ALL_TAGS[tagI] ?? '' };
+  }
+  /** What I am standing on ('ground', 'ice', 'ramp', …), or '' in the air. */
+  groundTag(): string {
+    return this.e.grounded ? this.e.groundTag : '';
+  }
+  /** Seconds since the episode started. */
+  time(): number {
+    return this.e.steps * PHYS.dt * this.e.P.substeps;
+  }
+  /** How many episodes this world has started. */
+  episode(): number {
+    return this.e.episode;
+  }
+  /** The id of the zone I train in. */
+  zone(): string {
+    return this.e.zone.id;
+  }
+  /** Teleport me to (x, z) on the ground (or to height y). Keeps the episode going. */
+  teleport(x: number, z: number, y?: number): void {
+    const a = this.e.a;
+    const nx = Number(x);
+    const nz = Number(z);
+    if (!Number.isFinite(nx) || !Number.isFinite(nz)) return;
+    const gy = this.e.groundY(nx, nz, 30);
+    a.x = nx;
+    a.z = nz;
+    a.y = Number.isFinite(Number(y)) && y !== undefined ? Number(y) : (gy ?? 0) + PHYS.agentR + 0.05;
+    a.vx = a.vy = a.vz = 0;
+  }
+  /** Give me a push: add to my velocity (m/s). */
+  push(x: number, y: number, z: number): void {
+    const a = this.e.a;
+    a.vx += Number(x) || 0;
+    a.vy += Number(y) || 0;
+    a.vz += Number(z) || 0;
   }
   end(success: boolean): void {
     if (this.e.done) return;

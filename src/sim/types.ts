@@ -88,6 +88,17 @@ export interface ObjDef {
   custom?: boolean;
 }
 
+/** A wall, ramp or floor patch placed in build mode or by a program. */
+export interface CustomWall {
+  x: number;
+  z: number;
+  w: number;
+  d: number;
+  h: number;
+  yaw: number;
+  tag: 'wall' | 'lava' | 'ice' | 'bouncy' | 'ramp' | 'spike';
+}
+
 export interface Rect {
   minX: number;
   maxX: number;
@@ -157,7 +168,9 @@ export type SensorSpec =
   | { kind: 'ground_probe'; count: number; dist: number }
   | { kind: 'time' }
   | { kind: 'last_action' }
-  | { kind: 'custom'; name: string; index: number };
+  | { kind: 'custom'; name: string; index: number }
+  /** frame stacking (layout only: the previous observations, `lag` steps ago) */
+  | { kind: 'memory'; frames: number; lag: number };
 
 export type AxisKind = 'move' | 'turn' | 'strafe' | 'jump' | 'kick';
 
@@ -207,9 +220,69 @@ export interface TrainSpec {
   mutation: number;
   mutationDecay: number;
   episodesPerEval: number;
+  // schedules: the learning rate (and PPO/REINFORCE entropy bonus) can change during training
+  lrSchedule: 'constant' | 'linear' | 'cosine';
+  /** learning rate at the end of the schedule, as a fraction of the starting value */
+  lrEnd: number;
+  /** entropy bonus at the end of the schedule (absolute); NaN = keep it constant */
+  entropyEnd: number;
+  /** steps over which schedules run (0 = use the stop limit, or 1M steps) */
+  scheduleSteps: number;
   // general
   stopSteps: number;
+  /** stop when the success rate over the last 100 episodes reaches this (0 = off) */
+  targetSuccess: number;
+  /** stop when the mean reward over the last 100 episodes reaches this (NaN = off) */
+  targetReward: number;
+  /** stop after this many minutes of training (0 = off) */
+  stopMinutes: number;
 }
+
+/** World physics that a program can change (per training run). */
+export interface PhysicsSpec {
+  /** downward acceleration in m/s² (Earth ≈ 9.8; the default is snappier) */
+  gravity: number;
+  /** how quickly the robot slows down on the ground */
+  friction: number;
+  /** how quickly the robot slows down in the air */
+  airDrag: number;
+  /** multiplier for the runner/chaser bots' speed */
+  npcSpeed: number;
+  /** multiplier for the kick strength */
+  kickPower: number;
+  /** mass of balls and crates (kg) */
+  ballMass: number;
+  crateMass: number;
+  /** physics ticks (1/60 s) per brain decision: 3 = the brain decides 20× per second */
+  decisionTicks: number;
+  /** upward speed given by bouncy pads */
+  bounce: number;
+}
+
+export const DEFAULT_PHYSICS: PhysicsSpec = {
+  gravity: 22,
+  friction: 3.2,
+  airDrag: 0.25,
+  npcSpeed: 1,
+  kickPower: 1,
+  ballMass: 0.45,
+  crateMass: 2.5,
+  decisionTicks: 3,
+  bounce: 12,
+};
+
+/** Bounds used by the compiler and code mode to keep physics sane. */
+export const PHYSICS_LIMITS: Record<keyof PhysicsSpec, [number, number]> = {
+  gravity: [0, 60],
+  friction: [0, 20],
+  airDrag: [0, 10],
+  npcSpeed: [0, 3],
+  kickPower: [0, 4],
+  ballMass: [0.05, 20],
+  crateMass: [0.2, 50],
+  decisionTicks: [1, 12],
+  bounce: [0, 30],
+};
 
 export interface BodySpec {
   speed: number; // multiplier
@@ -248,6 +321,16 @@ export interface AgentSpec {
   /** objects/walls placed in build mode */
   customObjects: ObjDef[];
   warnings: string[];
+  /** physics overrides (missing keys use DEFAULT_PHYSICS) */
+  physics?: Partial<PhysicsSpec>;
+  /** feed the last N observations to the brain (1 = only the current one) */
+  frameStack?: number;
+  /** where the program came from */
+  source?: 'blocks' | 'code';
+  /** code mode: lines of the generated factory before the user's first line (for error line numbers) */
+  codeLineOffset?: number;
+  /** world changes made by the program itself (code mode `world.add(...)`, or "clear the zone") */
+  world?: { objects: ObjDef[]; walls: CustomWall[]; clearZones: string[] };
 }
 
 export function defaultTrain(algo: AlgoKind = 'ppo'): TrainSpec {
@@ -284,6 +367,13 @@ export function defaultTrain(algo: AlgoKind = 'ppo'): TrainSpec {
     mutation: 0.1,
     mutationDecay: 0.995,
     episodesPerEval: 1,
+    lrSchedule: 'constant',
+    lrEnd: 0.1,
+    entropyEnd: NaN,
+    scheduleSteps: 0,
     stopSteps: 0,
+    targetSuccess: 0,
+    targetReward: NaN,
+    stopMinutes: 0,
   };
 }
