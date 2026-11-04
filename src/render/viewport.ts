@@ -45,6 +45,11 @@ export class Viewport {
   private lastRender = 0;
   private interacting = false;
   fps = 60;
+  /** redraw the shadow map every N frames (static world, so every other frame is plenty) */
+  private shadowEvery = 1;
+  private frameNo = 0;
+  /** auto quality turned shadows off because even the lowest resolution was too slow */
+  private autoNoShadows = false;
   private fpsFrames = 0;
   private fpsT0 = performance.now();
   /** camera moved since the last time the app asked (for overlay labels) */
@@ -112,7 +117,15 @@ export class Viewport {
 
   setQuality(q: Quality): void {
     this.quality = q;
-    const shadow = q === 'auto' ? 1536 : SHADOW[q];
+    this.autoNoShadows = false;
+    const shadow = q === 'auto' ? 1024 : SHADOW[q];
+    this.shadowEvery = q === 'high' ? 1 : 2;
+    this.setShadows(shadow);
+    this.dpr = q === 'high' ? this.dprMax : q === 'medium' ? Math.min(this.dprMax, 1.25) : q === 'low' ? Math.min(1, this.dprMax) * 0.75 : Math.min(this.dprMax, 1.5);
+    this.applyDpr();
+  }
+
+  private setShadows(shadow: number): void {
     this.renderer.shadowMap.enabled = shadow > 0;
     this.sun.castShadow = shadow > 0;
     if (shadow > 0 && this.sun.shadow.mapSize.x !== shadow) {
@@ -125,13 +138,16 @@ export class Viewport {
       const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
       if (m) for (const mm of Array.isArray(m) ? m : [m]) mm.needsUpdate = true;
     });
-    this.dpr = q === 'high' ? this.dprMax : q === 'medium' ? Math.min(this.dprMax, 1.25) : q === 'low' ? Math.min(1, this.dprMax) * 0.75 : Math.min(this.dprMax, 1.5);
-    this.applyDpr();
   }
 
   private applyDpr(): void {
     this.renderer.setPixelRatio(this.dpr);
     this.resize();
+  }
+
+  /** shadows currently on? */
+  get shadows(): boolean {
+    return this.renderer.shadowMap.enabled;
   }
 
   /** current render scale (for the settings dialog) */
@@ -216,6 +232,9 @@ export class Viewport {
       this.cameraMoved = true;
       this.lastCam.copy(this.camera.matrixWorld);
     }
+    this.frameNo++;
+    this.renderer.shadowMap.autoUpdate = false;
+    this.renderer.shadowMap.needsUpdate = this.shadowEvery <= 1 || this.frameNo % this.shadowEvery === 0 || !!this.fly || this.interacting;
     this.renderer.render(this.scene, this.camera);
     this.lastRender = nowT;
     this.adapt(rawDt * 1000);
@@ -245,6 +264,15 @@ export class Viewport {
       this.dpr = Math.max(0.6, +(this.dpr - 0.15).toFixed(2));
       this.slowFor = 0;
       this.applyDpr();
+    } else if (this.slowFor > 2500 && !this.autoNoShadows) {
+      // the lowest resolution is still too slow: shadows are the next most expensive thing
+      this.autoNoShadows = true;
+      this.slowFor = 0;
+      this.setShadows(0);
+    } else if (this.fastFor > 4000 && this.autoNoShadows && this.dpr >= 0.9) {
+      this.autoNoShadows = false;
+      this.fastFor = 0;
+      this.setShadows(1024);
     } else if (this.fastFor > 4000 && this.dpr < Math.min(this.dprMax, 1.5)) {
       this.dpr = Math.min(this.dprMax, 1.5, +(this.dpr + 0.1).toFixed(2));
       this.fastFor = 0;

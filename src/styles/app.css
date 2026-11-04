@@ -722,25 +722,27 @@ input[type='checkbox'] {
   container-type: inline-size;
 }
 @container (max-width: 700px) {
-  .vp-tr {
-    top: 56px;
+  .viewport .vp-tr {
+    top: 54px;
     right: auto;
     left: 10px;
   }
-  .hud-tc {
-    top: 102px;
+  .viewport .hud-tc {
+    top: 100px;
   }
-  .cursor-hint {
+  .viewport .cursor-hint {
     top: 136px;
   }
-  .hud-br {
+}
+@container (max-width: 520px) {
+  .viewport .hud-br {
     display: none;
   }
 }
 @container (max-width: 430px) {
-  .vp-tl .seg,
-  .vp-tl .tb-sep,
-  .vp-tr .sel {
+  .viewport .vp-tl .seg,
+  .viewport .vp-tl .tb-sep,
+  .viewport .vp-tr .sel {
     display: none;
   }
 }
@@ -2319,9 +2321,20 @@ details.concept .see {
   .topbar {
     gap: 6px;
     padding: 0 6px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .topbar::-webkit-scrollbar {
+    display: none;
+  }
+  .topbar > * {
+    flex-shrink: 0;
   }
   .project-btn {
     max-width: 150px;
+  }
+  .mobile-tabs .tb-label-txt {
+    display: inline;
   }
   .mobile-tabs {
     display: flex;

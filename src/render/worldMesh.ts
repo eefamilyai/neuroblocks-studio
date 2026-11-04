@@ -162,10 +162,11 @@ export function buildWorldMeshes(world: WorldDef, statics: StaticDef[]): WorldMe
   add(lavaGeos, lavaMat, false);
 
   // water around the island
-  const waterMat = new THREE.MeshPhongMaterial({ color: 0x2f8fc7, shininess: 70, specular: 0x6688aa });
+  // the sea covers half the screen: the cheapest lit material, no shadows on it
+  const waterMat = new THREE.MeshLambertMaterial({ color: 0x2f8fc7, emissive: 0x0b2a40 });
   const water = new THREE.Mesh(new THREE.PlaneGeometry(2400, 2400, 1, 1).rotateX(-Math.PI / 2), waterMat);
   water.position.y = world.waterY;
-  water.receiveShadow = true;
+  water.receiveShadow = false;
   group.add(water);
   mats.push(waterMat);
   // island skirt (cliffs below the slab down into the water)
