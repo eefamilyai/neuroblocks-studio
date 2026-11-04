@@ -271,7 +271,7 @@ export function defaultTrain(algo: AlgoKind = 'ppo'): TrainSpec {
     epsStart: 1,
     epsEnd: 0.05,
     epsDecay: 60000,
-    targetUpdate: 1000,
+    targetUpdate: 4000,
     learnStart: 2000,
     trainEvery: 4,
     double: true,
