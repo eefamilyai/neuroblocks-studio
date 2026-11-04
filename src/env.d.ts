@@ -5,3 +5,9 @@ declare module '@trainer-worker' {
   const TrainerWorker: { new (options?: { name?: string }): Worker };
   export default TrainerWorker;
 }
+
+/** The mini-LLM training worker. */
+declare module '@llm-worker' {
+  const LLMWorker: { new (options?: { name?: string }): Worker };
+  export default LLMWorker;
+}

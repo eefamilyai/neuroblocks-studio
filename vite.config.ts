@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { viteSingleFile } from 'vite-plugin-singlefile';
 
 const workerPath = fileURLToPath(new URL('./src/worker/trainer.worker.ts', import.meta.url));
+const llmWorkerPath = fileURLToPath(new URL('./src/llm/llm.worker.ts', import.meta.url));
 
 // `npm run build`         → dist/ (GitHub Pages): the training worker is its own file, the editor & extras load on demand
 // `npm run build:single`  → dist-single/index.html (one self-contained file you can double-click)
@@ -13,6 +14,7 @@ export default defineConfig(({ mode }) => ({
     alias: [
       // a separate worker file normally, but an inline (blob) worker in the single-file build
       { find: /^@trainer-worker$/, replacement: workerPath + (mode === 'single' ? '?worker&inline' : '?worker') },
+      { find: /^@llm-worker$/, replacement: llmWorkerPath + (mode === 'single' ? '?worker&inline' : '?worker') },
     ],
   },
   build: {

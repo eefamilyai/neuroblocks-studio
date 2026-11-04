@@ -20,4 +20,18 @@ for name in ["ppo", "dqn", "ppo-cont", "evo"]:
     good = err < 1e-4 and verr < 1e-4 and perr < 1e-4
     ok &= good
     print(f"{'OK ' if good else 'BAD'} {name:9s} onnx max|Δ|={err:.2e} value|Δ|={verr:.2e} numpy|Δ|={perr:.2e} outputs={[o.name for o in model.graph.output]} action={act}")
+
+# mini language models: tokenizer and transformer forward pass in NumPy
+for name in ["llm-bpe", "llm-char", "llm-word"]:
+    ref = json.load(open(f"{d}/{name}.json"))
+    spec = importlib.util.spec_from_file_location(name.replace("-", "_"), f"{d}/{name}.py")
+    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+    ids = mod.encode(ref["prompt"])[: len(ref["ids"])]
+    same_ids = ids == ref["ids"]
+    logits = mod.forward(ids)
+    err = np.abs(logits.reshape(-1) - np.array(ref["logits"])).max()
+    text = mod.generate("Once upon a time", n=20, seed=1)
+    good = same_ids and err < 1e-4 and mod.decode(ids) == mod.decode(ref["ids"])
+    ok &= good
+    print(f"{'OK ' if good else 'BAD'} {name:9s} tokens {'match' if same_ids else 'DIFFER'} logits max|Δ|={err:.2e} sample={text!r}")
 sys.exit(0 if ok else 1)
