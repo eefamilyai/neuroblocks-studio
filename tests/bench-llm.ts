@@ -22,7 +22,7 @@ const valText = corpus.text.slice(corpus.valStart ?? Math.floor(corpus.text.leng
 const cases = info.probe ? pickCases(info.probe.cases(valText), 50) : [];
 const trainIds = ids.subarray(0, split);
 const valIds = ids.subarray(split);
-const starts = corpus.align ? { train: lineStarts(trainIds, tok.vocab, model.cfg.ctx), val: lineStarts(valIds, tok.vocab, model.cfg.ctx) } : null;
+const starts = corpus.align ? { train: lineStarts(trainIds, tok.vocab, model.cfg.ctx, corpus.align), val: lineStarts(valIds, tok.vocab, model.cfg.ctx, corpus.align) } : null;
 const tr = new LLMTrainer(model, trainIds, valIds, { ...DEFAULT_TRAIN, steps, batch: Number(bS), lr: Number(process.env.LR ?? DEFAULT_TRAIN.lr) }, starts);
 console.log(`${ds} · ${kind} vocab ${tok.size} · ${ids.length} tokens · ${countParams(model.cfg)} weights`);
 const t0 = performance.now();

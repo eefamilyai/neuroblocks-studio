@@ -26,6 +26,7 @@ import type { ChangeKind } from './BuilderPanel.ts';
 import { defaultProject, PRESETS } from './presets.ts';
 import type { Preset } from './presets.ts';
 import { Playground } from './Playground.ts';
+import { KeyboardView } from './KeyboardView.ts';
 import { DataView, TokensView } from './TokensView.ts';
 import { TrainingView } from './TrainingView.ts';
 import { AttentionView } from './AttentionView.ts';
@@ -71,7 +72,7 @@ export function archKey(p: LLMProject): string {
 
 const clone = <T>(o: T): T => JSON.parse(JSON.stringify(o)) as T;
 
-type CenterTab = 'play' | 'tokens' | 'data';
+type CenterTab = 'play' | 'keyboard' | 'tokens' | 'data';
 type RightTab = 'train' | 'attention' | 'embeddings' | 'model';
 
 function tabBar<T extends string>(defs: [T, string, IconName, string][], pick: (t: T) => void): { el: HTMLElement; bodies: Map<T, HTMLElement>; set: (t: T) => void } {
@@ -131,6 +132,7 @@ export class LLMStudio {
   // views
   readonly builder: BuilderPanel;
   readonly playground: Playground;
+  readonly keyboard: KeyboardView;
   readonly tokensView: TokensView;
   readonly dataView: DataView;
   readonly trainingView: TrainingView;
@@ -187,6 +189,7 @@ export class LLMStudio {
       max: Math.max(1, Math.min(8, cores)),
     });
     this.playground = new Playground(this);
+    this.keyboard = new KeyboardView(this);
     this.tokensView = new TokensView(this);
     this.dataView = new DataView(this);
     this.trainingView = new TrainingView(this);
@@ -204,12 +207,14 @@ export class LLMStudio {
     this.centerTabs = tabBar<CenterTab>(
       [
         ['play', 'Playground', 'sparkles', 'Generate text with your model and see how sure it is of every token'],
+        ['keyboard', 'Keyboard', 'keyboard', 'Word prediction and autocorrect with your model, like a phone keyboard'],
         ['tokens', 'Tokens', 'type', 'How the text is cut into tokens; the vocabulary'],
         ['data', 'Data', 'scroll', 'The training text'],
       ],
       (t) => this.setCenter(t),
     );
     this.centerTabs.bodies.get('play')!.append(this.playground.el);
+    this.centerTabs.bodies.get('keyboard')!.append(this.keyboard.el);
     this.centerTabs.bodies.get('tokens')!.append(this.tokensView.el);
     this.centerTabs.bodies.get('data')!.append(this.dataView.el);
     const centerPane = h('section', { class: 'pane', id: 'llm-center' }, h('div', { class: 'pane-head', style: { paddingLeft: '6px' } }, this.centerTabs.el), ...this.centerTabs.bodies.values());
@@ -292,6 +297,7 @@ export class LLMStudio {
 
   private render(): void {
     this.playground.render(this.center === 'play');
+    this.keyboard.render(this.center === 'keyboard');
     this.tokensView.render(this.center === 'tokens');
     this.dataView.render(this.center === 'data');
     this.trainingView.render(this.right === 'train');
@@ -322,7 +328,7 @@ export class LLMStudio {
     if (this.corpusCache?.key !== key) {
       const p = this.project;
       let corpus: Corpus;
-      if (p.data.dataset === 'custom') corpus = { text: p.data.text ?? '', align: !!p.data.align };
+      if (p.data.dataset === 'custom') corpus = { text: p.data.text ?? '', align: p.data.align ? 'start' : undefined };
       else {
         const ds = getDataset(p.data.dataset) ?? getDataset('stories')!;
         corpus = ds.make(p.data.seed);

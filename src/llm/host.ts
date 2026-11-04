@@ -4,7 +4,8 @@
  */
 import { RNG } from '../ml/rng.ts';
 import { GPT } from './gpt.ts';
-import { Decoder, lineBreakTable, sampleToken, windowStart } from './decode.ts';
+import { Decoder, lineBreakTable, sampleToken, windowStart, withStart } from './decode.ts';
+import type { LineMode } from './decode.ts';
 import { Tokenizer } from './tokenizer.ts';
 import { LLMTrainer, lineStarts } from './train.ts';
 import { getDataset } from './datasets.ts';
@@ -24,6 +25,8 @@ export class LLMHost {
   private vals: [number, number][] = [];
   private accs: [number, number][] = [];
   private probeCases: ProbeCase[] = [];
+  private probeKind: 'exact' | 'next-word' = 'exact';
+  private align: LineMode | undefined = undefined;
   private lastProgress = 0;
   private lastWeights = 0;
   private lastSample = 0;
@@ -112,7 +115,7 @@ export class LLMHost {
     if (msg.init?.weights) model.setWeights(msg.init.weights);
     const trainIds = ids.subarray(0, split);
     const valIds = ids.subarray(split);
-    const starts = msg.align ? { train: lineStarts(trainIds, tok.vocab, p.model.ctx), val: lineStarts(valIds, tok.vocab, p.model.ctx) } : null;
+    const starts = msg.align ? { train: lineStarts(trainIds, tok.vocab, p.model.ctx, msg.align), val: lineStarts(valIds, tok.vocab, p.model.ctx, msg.align) } : null;
     const trainer = new LLMTrainer(model, trainIds, valIds, p.train, starts);
     if (msg.init) {
       trainer.step = msg.init.step;
@@ -134,6 +137,8 @@ export class LLMHost {
     let valText = msg.text.slice(msg.valStart ?? Math.floor(msg.text.length * 0.9));
     valText = valText.slice(valText.indexOf('\n') + 1); // skip a possibly cut first line
     this.probeCases = probe ? pickCases(probe.cases(valText), 50) : [];
+    this.probeKind = probe?.kind ?? 'exact';
+    this.align = msg.align;
     this.running = true;
     this.stepTarget = msg.stepOnly ? trainer.step + 1 : -1;
     const ms = performance.now() - t0;
@@ -284,7 +289,7 @@ export class LLMHost {
   private evaluate(): void {
     const tr = this.trainer!;
     this.vals.push([tr.step, tr.evaluate()]);
-    if (this.probeCases.length && this.tok) this.accs.push([tr.step, probeAccuracy(tr.model, this.tok, this.probeCases)]);
+    if (this.probeCases.length && this.tok) this.accs.push([tr.step, probeAccuracy(tr.model, this.tok, this.probeCases, this.probeKind, this.align)]);
   }
 
   private sendProgress(force: boolean): void {
@@ -313,9 +318,10 @@ export class LLMHost {
     this.lastSampleStep = tr.step;
     const dec = new Decoder(tr.model);
     dec.lineBreaks = this.breaks;
-    let ids = Array.from(tok.encode(this.sampleCfg.prompt));
+    dec.lineMode = this.align ?? 'start';
+    let ids = withStart(Array.from(tok.encode(this.sampleCfg.prompt)), this.breaks, tok.vocab, dec.lineMode);
     if (!ids.length) ids = [0];
-    ids = ids.slice(windowStart(ids, tr.model.cfg.ctx - 1, this.breaks));
+    ids = ids.slice(windowStart(ids, tr.model.cfg.ctx - 1, this.breaks, dec.lineMode));
     const out: number[] = [];
     let logits = dec.feed(ids);
     for (let i = 0; i < 160; i++) {

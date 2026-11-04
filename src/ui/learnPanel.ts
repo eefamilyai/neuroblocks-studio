@@ -54,6 +54,9 @@ const LLM_CONCEPTS: [string, string, string][] = [
   ['📈 Warm-up, cosine decay, AdamW, clipping', 'The recipe real LLMs are trained with: start with a tiny learning rate (warm-up), then slowly decay it (cosine); AdamW gives every weight its own step size plus a little weight decay; clipping caps sudden huge gradients.', 'Training tab → learning-rate and gradient-norm charts.'],
   ['🧵 Data parallelism', 'Split every batch over several workers, compute the gradients in parallel, add them up: the same update, faster. Big LLMs train like this on thousands of GPUs; here it is your CPU cores.', 'Builder → Training → CPU threads.'],
   ['🔧 Fine-tuning', 'Take a trained model and keep training it on new text: it keeps its general skills and picks up the new style. That is how base models become chat assistants or code helpers.', 'Train a story model, then "Train on your own text" → Fine-tune.'],
+  ['⌨️ Word prediction', 'A phone keyboard\'s suggestions are a language model\'s next-word predictions: the three most likely words after what you typed (or the most likely ways to finish the word you started). The usual score is how often the real next word is among the three.', 'Phone keyboard preset → Keyboard tab.'],
+  ['🔦 Beam search', 'The model predicts one token at a time, but a suggestion must be a whole word. Beam search follows the few most likely token sequences at once, drops the unlikely ones, and stops each one when its word ends. Translation and speech recognition use the same trick.', 'Keyboard tab → "How it chose the suggestions".'],
+  ['🩹 Autocorrect', 'The classic "noisy channel" idea: you meant some real word, and your fingers added noise. For every known word a letter or two away from what you typed, multiply how likely that word is HERE (the language model) by how likely that typo is. The best one wins, unless what you typed is already likely.', 'Keyboard tab: type "see you tomorow" and look at the scores.'],
   ['⚡ The KV cache', 'Generating token 200 should not redo the work for tokens 1–199. Each layer remembers the keys and values of earlier tokens, so a new token only computes its own. Every chatbot does this.', 'src/llm/decode.ts'],
   ['📐 Scale', 'Your model: about 100,000 weights and a context of 64 tokens. GPT-2 small: 124 million weights, 1,024 tokens. GPT-3: 175 billion. Same blocks, same loss, same training loop: mostly just bigger, and trained on far more text.', 'Model tab: where the weights are.'],
 ];
@@ -78,6 +81,7 @@ export class LearnPanel {
       'Tokens tab: switch the tokenizer between Characters and BPE and compare.',
       'Copy machine preset: open the Attention tab and find the head that points at the letter to copy.',
       'Calculator preset: does it learn to ADD sums it never saw, or only memorise?',
+      'Phone keyboard preset: type in the Keyboard tab and watch it suggest words and fix your typos.',
       'Train on your own text, then fine-tune a trained model on something new.',
       'Export → Python script, and run your model with NumPy or PyTorch.',
     ];

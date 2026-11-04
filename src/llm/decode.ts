@@ -14,6 +14,17 @@ import { RNG } from '../ml/rng.ts';
 import type { GPT } from './gpt.ts';
 import { activate, layerNormForward } from './gpt.ts';
 
+/**
+ * How one-example-per-line data is cut into windows:
+ *  - 'line':  every line starts at position 0 (the window starts right AFTER the
+ *             line break). Best for fixed-format tasks (sums, puzzles): every
+ *             digit always sits at the same position.
+ *  - 'start': the line break in FRONT of the line is the first token of the
+ *             window. It works as a "start" token, so the model also learns to
+ *             predict the first word of a line (names, messages).
+ */
+export type LineMode = 'line' | 'start';
+
 /** Which token ids contain a line break (for windows that should start at a line). */
 export function lineBreakTable(vocab: string[]): Uint8Array {
   return Uint8Array.from(vocab, (v) => (v.includes('\n') ? 1 : 0));
@@ -21,20 +32,29 @@ export function lineBreakTable(vocab: string[]): Uint8Array {
 
 /**
  * Where to start a window of at most `max` tokens that ends at the end of
- * `tokens`. With `breaks` (one example per line), it starts at the earliest
- * line start that fits, like the training windows; otherwise as early as fits.
+ * `tokens`. With `breaks` (one example per line) it starts where a line starts,
+ * as in training: at the earliest line break that fits ('start' mode) or right
+ * after it ('line' mode). Otherwise as early as fits.
  */
-export function windowStart(tokens: ArrayLike<number>, max: number, breaks: Uint8Array | null): number {
+export function windowStart(tokens: ArrayLike<number>, max: number, breaks: Uint8Array | null, mode: LineMode = 'start'): number {
   const first = Math.max(0, tokens.length - max);
   if (!breaks || first === 0) return first;
-  for (let i = first; i < tokens.length; i++) if (breaks[tokens[i - 1]]) return i;
+  for (let i = first; i < tokens.length; i++) if (mode === 'start' ? breaks[tokens[i]] : breaks[tokens[i - 1]]) return i;
   return first;
+}
+
+/** 'start' mode: put a line break in front if the text does not start with one (the start token). */
+export function withStart(ids: number[], breaks: Uint8Array | null, vocab: string[], mode: LineMode = 'start'): number[] {
+  if (mode !== 'start' || !breaks || (ids.length && breaks[ids[0]])) return ids;
+  const nl = vocab.indexOf('\n');
+  return nl >= 0 ? [nl, ...ids] : ids;
 }
 
 export class Decoder {
   readonly model: GPT;
   /** set for one-example-per-line data: when the window is full it slides to a line start */
   lineBreaks: Uint8Array | null = null;
+  lineMode: LineMode = 'start';
   private kc: Float32Array[];
   private vc: Float32Array[];
   pos = 0;
@@ -77,6 +97,22 @@ export class Decoder {
     this.tokens = [];
   }
 
+  /** An independent copy of this decoder's state (for beam search: try several continuations). */
+  clone(): Decoder {
+    const d = new Decoder(this.model);
+    const n = this.pos * this.model.cfg.d;
+    for (let l = 0; l < this.kc.length; l++) {
+      d.kc[l].set(this.kc[l].subarray(0, n));
+      d.vc[l].set(this.vc[l].subarray(0, n));
+    }
+    d.pos = this.pos;
+    d.tokens = this.tokens.slice();
+    d.logits.set(this.logits);
+    d.lineBreaks = this.lineBreaks;
+    d.lineMode = this.lineMode;
+    return d;
+  }
+
   /** Feed a list of tokens (e.g. the prompt); returns the logits after the last one. */
   feed(tokens: ArrayLike<number>): Float32Array {
     for (let i = 0; i < tokens.length; i++) this.step(tokens[i]);
@@ -93,10 +129,16 @@ export class Decoder {
       let from = this.tokens.length - Math.floor(ctx / 2);
       if (this.lineBreaks) {
         const n = this.tokens.length;
-        const ls = windowStart(this.tokens, ctx - 1, this.lineBreaks);
-        // the window ends with a line break: the new line starts fresh at position 0
-        if (this.lineBreaks[this.tokens[n - 1]]) from = n;
-        else if (ls > 0 && this.lineBreaks[this.tokens[ls - 1]]) from = ls;
+        if (this.lineMode === 'start') {
+          // keep everything from the earliest line break that leaves room (it starts the line, as in training)
+          const ls = windowStart(this.tokens, ctx - 1, this.lineBreaks, 'start');
+          if (this.lineBreaks[this.tokens[ls]]) from = ls;
+        } else if (this.lineBreaks[this.tokens[n - 1]]) {
+          from = n; // the window ends with a line break: the new line starts fresh at position 0
+        } else {
+          const ls = windowStart(this.tokens, ctx - 1, this.lineBreaks, 'line');
+          if (ls > 0 && this.lineBreaks[this.tokens[ls - 1]]) from = ls;
+        }
       }
       const keep = this.tokens.slice(from);
       this.reset();

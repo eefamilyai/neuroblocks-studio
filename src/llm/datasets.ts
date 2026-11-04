@@ -5,13 +5,14 @@
  * your own text.
  */
 import { RNG } from '../ml/rng.ts';
+import type { LineMode } from './decode.ts';
 
 export interface Corpus {
   text: string;
   /** where the validation part starts (default: the last 10 %) */
   valStart?: number;
-  /** every line is one example: training windows start at the beginning of a line */
-  align?: boolean;
+  /** every line is one example: how training windows line up with the lines (see LineMode) */
+  align?: LineMode;
 }
 
 /** A task with right answers (e.g. sums): test cases taken from the validation text. */
@@ -19,7 +20,9 @@ export interface Probe {
   /** what the accuracy measures, e.g. "sums correct" */
   name: string;
   help: string;
-  /** prompt → expected completion (up to the end of the line) */
+  /** 'exact': the greedy completion must be exactly the answer; 'next-word': the answer must be among the 3 suggested next words */
+  kind?: 'exact' | 'next-word';
+  /** prompt → expected completion (up to the end of the line) or next word */
   cases(valText: string): { prompt: string; answer: string }[];
 }
 
@@ -122,6 +125,130 @@ function pyProgram(rng: RNG): string {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Text messages: everyday chat, for word prediction and autocorrect
+// ---------------------------------------------------------------------------
+const M = {
+  NAME: ['Mia', 'Leo', 'Sam', 'Emma', 'Noah', 'Ava', 'Lily', 'Max', 'Zoe', 'Ben', 'Ella', 'Jack', 'mom', 'dad', 'grandma'],
+  WHEN: ['today', 'tonight', 'tomorrow', 'this weekend', 'on Saturday', 'on Sunday', 'on Friday', 'after school', 'after work', 'later', 'next week', 'in the morning', 'this afternoon', 'tomorrow morning'],
+  ACT: ['get pizza', 'watch a movie', 'go for a walk', 'play football', 'get coffee', 'study together', 'go to the beach', 'play video games', 'go shopping', 'have lunch', 'go swimming', 'go to the park', 'get ice cream', 'play basketball', 'go for a run', 'cook dinner'],
+  TASK: ['school', 'work', 'practice', 'class', 'the meeting', 'dinner', 'my homework', 'the project'],
+  PLACE: ['the park', 'the mall', 'school', 'the library', 'the gym', 'the station', 'the cinema', 'the beach', 'the cafe', 'home', 'the office', 'practice', 'the bus stop'],
+  TIME: ['5 pm', '6 pm', '7 pm', '8 pm', 'noon', '10 am', '9 am', '4:30', '7:30', '3 pm'],
+  EVENT: ['the party', 'the game', 'the movie', 'practice', 'the concert', 'dinner', 'the meeting', 'class', 'the show', 'the match'],
+  N: ['2', '5', '10', '15', '20', '30'],
+  EXCUSE: ['The bus is late.', 'Traffic is crazy.', 'I missed the train.', 'My alarm did not go off.', 'I could not find my keys.', 'Practice ran late.', 'My phone died.'],
+  STORE: ['store', 'supermarket', 'bakery', 'pharmacy', 'shop'],
+  ITEM: ['the charger', 'your jacket', 'the tickets', 'the snacks', 'an umbrella', 'my headphones', 'some water', 'the keys', 'your book', 'a towel'],
+  MYITEM: ['my phone', 'my keys', 'my wallet', 'my jacket', 'my laptop', 'my bag', 'my charger', 'my headphones'],
+  GOOD: ['great', 'fun', 'perfect', 'awesome', 'amazing', 'good', 'like a plan'],
+  THING: ['the birthday present', 'the ride', 'dinner', 'your help', 'the flowers', 'the advice', 'lunch', 'the card', 'everything', 'coming'],
+  FEELING: ['tired', 'happy', 'bored', 'excited', 'hungry', 'stressed', 'sleepy', 'nervous', 'sick'],
+  REASON: ['I have a test tomorrow', 'work was so long', 'it is Friday', 'we won the game', 'I did not sleep much', 'the weekend is here', 'I have so much homework'],
+  WIN: ['your new job', 'the new house', 'passing the test', 'winning the game', 'your graduation', 'the new baby'],
+  TEST: ['your exam', 'the interview', 'the test', 'your driving test', 'the game', 'the presentation'],
+  SHOW: ['the new movie', 'the game last night', 'the video I sent', 'the news', 'the photos', 'my message'],
+  THING2: ['movie', 'food', 'concert', 'game', 'party', 'pizza', 'weather', 'trip', 'show'],
+  ADJ: ['amazing', 'so good', 'really fun', 'a bit boring', 'great', 'terrible', 'awesome', 'too long'],
+  FILE: ['photos', 'notes', 'address', 'link', 'homework', 'recipe', 'pictures'],
+  FOOD: ['pizza', 'sushi', 'burgers', 'tacos', 'noodles', 'ice cream', 'pancakes', 'sandwiches'],
+  GROCERY: ['milk', 'bread', 'eggs', 'coffee', 'cheese', 'bananas', 'juice', 'apples'],
+  PET: ['cat', 'dog', 'fish', 'rabbit'],
+  FAMILY: ['mom', 'dad', 'sister', 'brother', 'grandma', 'family'],
+};
+const MESSAGES = [
+  'Hey {NAME}! How are you?',
+  'Hi {NAME}, how was {EVENT}?',
+  'Good morning! Did you sleep well?',
+  'Good night, see you {WHEN}.',
+  'How is your {FAMILY} doing?',
+  'Long time no see! How have you been?',
+  'Do you want to {ACT} {WHEN}?',
+  'Are you free {WHEN}?',
+  'Want to {ACT} after {TASK}?',
+  'We should {ACT} {WHEN}!',
+  'I am going to {PLACE} {WHEN}. Want to come?',
+  'Can we meet at {PLACE} at {TIME}?',
+  'What time should we meet?',
+  'Is {TIME} okay for you?',
+  '{EVENT} starts at {TIME}, do not be late!',
+  'See you at {PLACE}!',
+  'See you {WHEN}!',
+  'I will be there in {N} minutes.',
+  'I am on my way!',
+  'Sorry, I am running late. {EXCUSE}',
+  'I just got home.',
+  'Let me know when you get home.',
+  'Where are you right now?',
+  'I am at {PLACE}, where are you?',
+  'Can you pick me up from {PLACE}?',
+  'Do you need anything from the {STORE}?',
+  'Can you bring {ITEM}?',
+  'Do not forget {ITEM}!',
+  'I think I left {MYITEM} at {PLACE}.',
+  'Have you seen {MYITEM}?',
+  'Can you call me when you are free?',
+  'I will call you {WHEN}.',
+  'Text me when you get there.',
+  'That sounds {GOOD}!',
+  'Thank you so much for {THING}!',
+  'Thanks for {THING}, you are the best!',
+  'No problem, any time.',
+  'I am so {FEELING} right now.',
+  'I am {FEELING} because {REASON}.',
+  'Happy birthday {NAME}! Have an amazing day!',
+  'Congratulations on {WIN}!',
+  'Good luck with {TEST} {WHEN}!',
+  'How did {TEST} go?',
+  'I miss you!',
+  'Love you, see you {WHEN}.',
+  'Haha that is so funny.',
+  'Yes, that works for me.',
+  'Sure, sounds good.',
+  'Okay, see you then.',
+  'Sorry, I cannot make it {WHEN}.',
+  'Did you see {SHOW}?',
+  'Have you finished {TASK} yet?',
+  'The {THING2} was {ADJ}.',
+  'What are you doing {WHEN}?',
+  'Are you coming to {EVENT}?',
+  'Can you help me with {TASK}?',
+  'Can you send me the {FILE}?',
+  'I am hungry. Want to get {FOOD}?',
+  'We are out of {GROCERY}, can you get some?',
+  'Dinner is ready!',
+  'It is raining, take an umbrella.',
+  'Do not forget to feed the {PET}.',
+  'Can I call you {WHEN}?',
+  'I am at {PLACE} with {NAME}.',
+  'Running late, sorry!',
+  'Be there in {N} minutes!',
+  'Okay, thanks!',
+  'Great, thanks!',
+  'Got it, thanks!',
+  'Thanks, see you {WHEN}!',
+  'Yes! See you {WHEN}.',
+  'Hey, are you free {WHEN}?',
+  'Oh no, I am so sorry!',
+  'Haha, thank you!',
+  'Okay, I will call you {WHEN}.',
+  'No worries, see you at {PLACE}.',
+  'Perfect, thank you so much!',
+];
+
+function oneMessage(rng: RNG): string {
+  const s = pick(rng, MESSAGES).replace(/\{([A-Z0-9]+)\}/g, (_, k: string) => pick(rng, M[k as keyof typeof M]));
+  return s[0].toUpperCase() + s.slice(1);
+}
+
+function message(rng: RNG): string {
+  // sometimes two sentences in one message
+  let s = oneMessage(rng);
+  if (rng.next() < 0.25) s += ' ' + oneMessage(rng);
+  // many people text in lower case
+  return rng.next() < 0.3 ? s.toLowerCase() : s;
+}
+
 function lettersOf(rng: RNG, n: number): string {
   let s = '';
   for (let i = 0; i < n; i++) s += String.fromCharCode(97 + rng.int(26));
@@ -173,7 +300,7 @@ export const DATASETS: DatasetInfo[] = [
         rng.shuffle(copy);
         val.push(...copy);
       }
-      return { text: text + val.join('\n') + '\n', valStart: text.length, align: true };
+      return { text: text + val.join('\n') + '\n', valStart: text.length, align: 'start' };
     },
     suggest: { tokenizer: 'char', ctx: 16 },
   },
@@ -194,7 +321,7 @@ export const DATASETS: DatasetInfo[] = [
       for (let r = 0; r < 2; r++) for (const p of train) lines.push(line(p));
       rng.shuffle(lines);
       const text = lines.join('');
-      return { text: text + held.map(line).join(''), valStart: text.length, align: true };
+      return { text: text + held.map(line).join(''), valStart: text.length, align: 'line' };
     },
     probe: {
       name: 'new sums correct',
@@ -220,7 +347,7 @@ export const DATASETS: DatasetInfo[] = [
         const s = lettersOf(rng, 5);
         lines.push(rng.next() < 0.5 ? `${s}>${s}` : `${s}<${[...s].reverse().join('')}`);
       }
-      return { text: lines.join('\n') + '\n', align: true };
+      return { text: lines.join('\n') + '\n', align: 'line' };
     },
     probe: {
       name: 'new puzzles correct',
@@ -233,6 +360,39 @@ export const DATASETS: DatasetInfo[] = [
           .map((m) => ({ prompt: m[1], answer: m[2] })),
     },
     suggest: { tokenizer: 'char', ctx: 24 },
+  },
+  {
+    id: 'messages',
+    name: 'Text messages',
+    emoji: '💬',
+    blurb: 'Everyday chat messages, one per line ("See you tomorrow!", "Can you pick me up from the station?"). Train it, then open the Keyboard tab: it suggests your next word and fixes typos, like a phone keyboard.',
+    make(seed) {
+      const rng = new RNG(seed);
+      const lines: string[] = [];
+      let len = 0;
+      while (len < 110000) {
+        const m = message(rng);
+        lines.push(m);
+        len += m.length + 1;
+      }
+      return { text: lines.join('\n') + '\n', align: 'start' };
+    },
+    probe: {
+      name: 'next word in top 3',
+      kind: 'next-word',
+      help: 'For 50 messages it never trained on: is the real next word among the 3 words the keyboard would suggest? (The usual way to score phone keyboards.)',
+      cases: (val) => {
+        const out: { prompt: string; answer: string }[] = [];
+        val.split('\n').forEach((line, i) => {
+          const words = [...line.matchAll(/[A-Za-z]+/g)];
+          if (words.length < 3) return;
+          const w = words[1 + (i % (words.length - 1))];
+          out.push({ prompt: line.slice(0, w.index), answer: w[0] });
+        });
+        return out;
+      },
+    },
+    suggest: { tokenizer: 'word', ctx: 24 },
   },
   {
     id: 'python',

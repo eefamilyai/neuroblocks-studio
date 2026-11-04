@@ -30,7 +30,7 @@ export function openWelcome(o: { startFirst: () => void; missions: () => void; c
         'button',
         { class: 'welcome-llm', type: 'button', onclick: () => (m.close(), o.language()) },
         h('span', { class: 'n' }, icon('chat')),
-        h('div', null, h('b', null, 'New: build mini language models'), h('p', null, 'Switch to Language (top left) to design and train your own tiny GPT on stories, names, sums or your own text, and see its tokens, attention and embeddings.')),
+        h('div', null, h('b', null, 'New: build mini language models'), h('p', null, 'Switch to Language (top left) to design and train your own tiny GPT on stories, names, sums, text messages or your own writing. Make a phone keyboard that predicts your next word and fixes typos, and look at its tokens, attention and embeddings.')),
       ),
       h('p', { class: 'small muted', style: { margin: '0' } }, 'Everything (neural networks, backpropagation, PPO, DQN, evolution, transformers, physics) is written from scratch in TypeScript and runs in your browser. No servers, no ML libraries, nothing hidden.'),
     ),

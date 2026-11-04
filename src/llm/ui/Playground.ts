@@ -7,7 +7,7 @@
 import { RNG } from '../../ml/rng.ts';
 import { btn, clear, fmt, h, section, seg, setText, toast } from '../../ui/dom.ts';
 import { icon } from '../../ui/icons.ts';
-import { Decoder, lineBreakTable, sampleToken, softmaxT, topK, windowStart } from '../decode.ts';
+import { Decoder, lineBreakTable, sampleToken, softmaxT, topK, windowStart, withStart } from '../decode.ts';
 import { showToken } from '../tokenizer.ts';
 import type { LLMStudio } from './LLMStudio.ts';
 
@@ -198,13 +198,17 @@ export class Playground {
     const tr = this.studio.trained!;
     const dec = new Decoder(tr.model);
     dec.lineBreaks = this.studio.corpus.align ? lineBreakTable(tr.tok.vocab) : null;
+    dec.lineMode = this.studio.corpus.align ?? 'start';
     return dec;
   }
 
   /** The newest tokens that fit in the context window (from a line start for line-by-line data). */
   private window(ids: number[]): number[] {
     const tr = this.studio.trained!;
-    return ids.slice(windowStart(ids, Math.max(1, tr.model.cfg.ctx - 1), this.studio.corpus.align ? lineBreakTable(tr.tok.vocab) : null));
+    const mode = this.studio.corpus.align ?? 'start';
+    const breaks = this.studio.corpus.align ? lineBreakTable(tr.tok.vocab) : null;
+    const all = withStart(ids, breaks, tr.tok.vocab, mode);
+    return all.slice(windowStart(all, Math.max(1, tr.model.cfg.ctx - 1), breaks, mode));
   }
 
   /** What to condition on when there is no text at all: a new line (or token 0). */

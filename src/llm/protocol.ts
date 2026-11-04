@@ -1,6 +1,7 @@
 import type { GPTConfig } from './gpt.ts';
 import type { TokenizerJSON, TokenizerKind } from './tokenizer.ts';
 import type { LLMTrainConfig } from './train.ts';
+import type { LineMode } from './decode.ts';
 
 /** Everything that describes a mini-LLM project (saved to files / autosave). */
 export interface LLMProject {
@@ -38,8 +39,8 @@ export type ToLLM =
       project: LLMProject;
       text: string;
       valStart?: number;
-      /** windows start at line beginnings (every line is one example) */
-      align?: boolean;
+      /** every line is one example: how training windows line up with the lines */
+      align?: LineMode;
       /** continue from a trained model (its tokenizer is reused) */
       init?: { tokenizer: TokenizerJSON; weights: Float32Array[]; step: number; tokens: number } | null;
       stepOnly?: boolean;

@@ -4,8 +4,10 @@
  * continuation is exactly right ("95", then a new line).
  */
 import { Decoder } from './decode.ts';
+import type { LineMode } from './decode.ts';
 import type { GPT } from './gpt.ts';
 import type { Tokenizer } from './tokenizer.ts';
+import { suggestWords } from './keyboard.ts';
 
 export interface ProbeCase {
   prompt: string;
@@ -34,9 +36,18 @@ export function complete(dec: Decoder, tok: Tokenizer, prompt: string, maxTokens
   return out;
 }
 
-/** Fraction of cases answered exactly right (NaN without cases). */
-export function probeAccuracy(model: GPT, tok: Tokenizer, cases: ProbeCase[]): number {
+/**
+ * Fraction of cases answered right (NaN without cases). 'exact': the greedy
+ * completion is exactly the answer; 'next-word': the answer is one of the 3
+ * suggested next words.
+ */
+export function probeAccuracy(model: GPT, tok: Tokenizer, cases: ProbeCase[], kind: 'exact' | 'next-word' = 'exact', align?: LineMode): number {
   if (!cases.length) return NaN;
+  if (kind === 'next-word') {
+    let hit = 0;
+    for (const c of cases) if (suggestWords({ model, tok, align }, c.prompt, 3).some((s) => s.word === c.answer)) hit++;
+    return hit / cases.length;
+  }
   const dec = new Decoder(model);
   let ok = 0;
   for (const c of cases) {

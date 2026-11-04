@@ -1,14 +1,24 @@
 /**
- * Where windows may start when every line is one example: right after each
- * token that contains a line break (and at 0), as long as a whole window fits.
+ * Where windows may start when every line is one example (and at 0), as long
+ * as a whole window fits:
+ *  - 'start': AT the line break in front of each line. The line break works as
+ *    a "start of example" token: the model learns what the first word of a
+ *    line looks like, and generation can start from a line break.
+ *  - 'line': right AFTER it, so every line starts at position 0. Fixed-format
+ *    tasks (sums, puzzles) learn much faster this way.
  */
-export function lineStarts(ids: Int32Array, vocab: string[], T: number): Int32Array {
+export function lineStarts(ids: Int32Array, vocab: string[], T: number, mode: LineMode = 'start'): Int32Array {
   const nl = new Uint8Array(vocab.length);
   vocab.forEach((v, i) => (nl[i] = v.includes('\n') ? 1 : 0));
   const out: number[] = [];
   const last = ids.length - T - 1;
-  if (last >= 0) out.push(0);
-  for (let i = 0; i < ids.length - 1 && i + 1 <= last; i++) if (nl[ids[i]]) out.push(i + 1);
+  if (mode === 'line') {
+    if (last >= 0) out.push(0);
+    for (let i = 0; i + 1 <= last; i++) if (nl[ids[i]]) out.push(i + 1);
+    return Int32Array.from(out);
+  }
+  if (last >= 0 && !nl[ids[0]]) out.push(0);
+  for (let i = 0; i <= last; i++) if (nl[ids[i]]) out.push(i);
   return Int32Array.from(out);
 }
 
@@ -25,6 +35,7 @@ export function lineStarts(ids: Int32Array, vocab: string[], T: number): Int32Ar
  * followed by a cosine decay, and gradient clipping, like real LLM training.
  */
 import { RNG } from '../ml/rng.ts';
+import type { LineMode } from './decode.ts';
 import { GPT } from './gpt.ts';
 
 export interface LLMTrainConfig {

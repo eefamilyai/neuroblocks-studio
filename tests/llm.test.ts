@@ -4,7 +4,7 @@
  */
 import { GPT, countParams } from '../src/llm/gpt.ts';
 import type { GPTConfig } from '../src/llm/gpt.ts';
-import { Decoder, lineBreakTable, sampleToken, topK, windowStart } from '../src/llm/decode.ts';
+import { Decoder, lineBreakTable, sampleToken, topK, windowStart, withStart } from '../src/llm/decode.ts';
 import { Tokenizer } from '../src/llm/tokenizer.ts';
 import { DATASETS, getDataset } from '../src/llm/datasets.ts';
 import { DEFAULT_TRAIN, LLMTrainer, lineStarts } from '../src/llm/train.ts';
@@ -12,6 +12,7 @@ import { RNG } from '../src/ml/rng.ts';
 import { addGrads, packGrads, packWeights, scaleGrads, splitBatch, unpackWeights } from '../src/llm/parallel.ts';
 import { pickCases, probeAccuracy } from '../src/llm/probe.ts';
 import { b64ToF32, f32ToB64, loadModel, saveModel, thin, validateLLMFile } from '../src/llm/serialize.ts';
+import { correctWord, editDistance, knownWords, splitForSuggest, suggestWords } from '../src/llm/keyboard.ts';
 import { test, assert } from './harness.ts';
 
 const tiny = (over: Partial<GPTConfig> = {}): GPTConfig => ({ vocab: 7, ctx: 5, d: 8, layers: 2, heads: 2, mlp: 2, act: 'gelu', pos: 'learned', tie: false, ...over });
@@ -215,7 +216,7 @@ test('the arithmetic probe checks held-out sums exactly', () => {
   const val = c.text.slice(c.valStart);
   const cases = pickCases(ds.probe!.cases(val), 50);
   assert(cases.length === 50, `cases ${cases.length}`);
-  assert(c.align === true, 'one problem per line');
+  assert(c.align === 'line', 'one problem per line, each starting at position 0');
   for (const k of cases) {
     const [a, b] = k.prompt.slice(0, -1).split('+').map(Number);
     assert(a + b === Number(k.answer) && k.answer.length === 3, `${k.prompt} ${k.answer}`);
@@ -231,24 +232,29 @@ test('line-aligned windows start right after line breaks', () => {
   const text = 'ab\ncd\nefg\nh\n';
   const tok = Tokenizer.train('char', text);
   const ids = tok.encode(text);
-  const st = Array.from(lineStarts(ids, tok.vocab, 2));
-  // line starts are 0 (a), 3 (c), 6 (e) and 10 (h), but a window of 2 tokens + 1 target must fit: not 10
-  assert(JSON.stringify(st) === '[0,3,6]', `starts ${JSON.stringify(st)}`);
-  for (const i of st) assert(i === 0 || text[i - 1] === '\n', `start ${i}`);
+  const st = Array.from(lineStarts(ids, tok.vocab, 2, 'start'));
+  // 'start': windows start at 0 and AT the line breaks 2, 5 and 9 (the break is the start token); 11 has no room
+  assert(JSON.stringify(st) === '[0,2,5,9]', `starts ${JSON.stringify(st)}`);
+  for (const i of st) assert(i === 0 || text[i] === '\n', `start ${i}`);
+  // 'line': right AFTER the line breaks, so every line starts at position 0 (10 has no room)
+  const sl = Array.from(lineStarts(ids, tok.vocab, 2, 'line'));
+  assert(JSON.stringify(sl) === '[0,3,6]', `line starts ${JSON.stringify(sl)}`);
   // the trainer only samples aligned windows
   const model = new GPT({ vocab: tok.size, ctx: 2, d: 8, layers: 1, heads: 2, mlp: 2, act: 'gelu', pos: 'learned', tie: true }, 1);
-  const tr = new LLMTrainer(model, ids, ids, { ...DEFAULT_TRAIN, batch: 8 }, { train: lineStarts(ids, tok.vocab, 2), val: lineStarts(ids, tok.vocab, 2) });
+  const tr = new LLMTrainer(model, ids, ids, { ...DEFAULT_TRAIN, batch: 8 }, { train: lineStarts(ids, tok.vocab, 2, 'start'), val: lineStarts(ids, tok.vocab, 2, 'start') });
   const { x } = tr.sampleBatch();
-  for (let b = 0; b < 8; b++) assert(['a', 'c', 'e'].includes(tok.vocab[x[b * 2]]), `window ${b} starts with ${tok.vocab[x[b * 2]]}`);
+  for (let b = 0; b < 8; b++) assert(['a', '\n'].includes(tok.vocab[x[b * 2]]), `window ${b} starts with ${JSON.stringify(tok.vocab[x[b * 2]])}`);
 });
 
 test('generation windows slide to a line start for line-by-line data', () => {
   const vocab = ['\n', 'a', 'b'];
   const br = lineBreakTable(vocab);
   const ids = [1, 2, 0, 1, 1, 2, 0, 2, 1];
-  // the newest 5 tokens would start mid-line (index 4); the earliest line start that fits is 7
-  assert(windowStart(ids, 5, br) === 7, `got ${windowStart(ids, 5, br)}`);
-  assert(windowStart(ids, 7, br) === 3, `got ${windowStart(ids, 7, br)}`);
+  // the newest 5 tokens would start mid-line (index 4); the earliest line break that fits is at 6…
+  assert(windowStart(ids, 5, br, 'start') === 6, `got ${windowStart(ids, 5, br, 'start')}`);
+  assert(windowStart(ids, 7, br, 'start') === 2, `got ${windowStart(ids, 7, br, 'start')}`);
+  // …and the earliest line START (right after a break) is at 7
+  assert(windowStart(ids, 5, br, 'line') === 7 && windowStart(ids, 7, br, 'line') === 3, `line mode ${windowStart(ids, 5, br, 'line')} ${windowStart(ids, 7, br, 'line')}`);
   assert(windowStart(ids, 5, null) === 4, 'without line breaks: the newest tokens that fit');
   assert(windowStart(ids, 20, br) === 0, 'everything fits');
   // the decoder keeps going past its context window either way
@@ -258,13 +264,57 @@ test('generation windows slide to a line start for line-by-line data', () => {
   for (const t of ids) dec.step(t);
   assert(dec.pos <= 4 && dec.tokens.length === dec.pos, 'window stays within the context');
   assert(dec.tokens[0] === ids[ids.length - dec.tokens.length], 'keeps the newest tokens');
-  // a full window that ends with a line break: the next token starts again at position 0
+  // a full window that ends with a line break: the new line starts again near position 0, after its line break
   const d2 = new Decoder(model);
   d2.lineBreaks = br;
   d2.feed([1, 2, 1, 0]);
   d2.step(2);
-  assert(d2.pos === 1 && d2.tokens[0] === 2, `pos ${d2.pos} tokens ${d2.tokens}`);
+  assert(d2.pos === 2 && d2.tokens[0] === 0 && d2.tokens[1] === 2, `pos ${d2.pos} tokens ${d2.tokens}`);
+  // 'line' mode: the new line starts fresh at position 0
+  const d3 = new Decoder(model);
+  d3.lineBreaks = br;
+  d3.lineMode = 'line';
+  d3.feed([1, 2, 1, 0]);
+  d3.step(2);
+  assert(d3.pos === 1 && d3.tokens[0] === 2, `line mode: pos ${d3.pos} tokens ${d3.tokens}`);
+  assert(JSON.stringify(withStart([1, 2], br, vocab)) === '[0,1,2]' && JSON.stringify(withStart([0, 1], br, vocab)) === '[0,1]', 'start token');
+  assert(JSON.stringify(withStart([1, 2], br, vocab, 'line')) === '[1,2]', 'no start token in line mode');
   // partial top-k selection agrees with a full sort
   const p = [0.1, 0.5, 0.05, 0.2, 0.15, 0.0];
   assert(JSON.stringify(topK(p, 3).map((x) => x[0])) === '[1,3,4]', `topK ${JSON.stringify(topK(p, 3))}`);
+});
+
+test('keyboard: edit distance, word splitting, suggestions and autocorrect', () => {
+  // Damerau–Levenshtein: a swap of neighbours is ONE typo
+  assert(editDistance('teh', 'the') === 1 && editDistance('tomorow', 'tomorrow') === 1 && editDistance('kitten', 'sitting') === 3, 'edit distances');
+  assert(editDistance('abc', 'abcdefg', 2) === 3, 'gives up above the limit');
+  // the leading space belongs to the word being typed (that is how the tokenizers cut text)
+  assert(JSON.stringify(splitForSuggest('see you to')) === JSON.stringify({ context: 'see you', lead: ' to', partial: 'to' }), 'split partial word');
+  assert(JSON.stringify(splitForSuggest('see you ')) === JSON.stringify({ context: 'see you', lead: ' ', partial: '' }), 'split after a space');
+  assert(splitForSuggest('').lead === '' && splitForSuggest('hi').context === '', 'split at the start');
+  // a tiny word-level model that knows four messages
+  const lines = ['see you tomorrow', 'see you later', 'thank you so much', 'i am so tired'];
+  const rng = new RNG(5);
+  const text = Array.from({ length: 600 }, () => lines[rng.int(lines.length)]).join('\n') + '\n';
+  const tok = Tokenizer.train('word', text, 64);
+  const ids = tok.encode(text);
+  const ctx = 8;
+  const model = new GPT({ vocab: tok.size, ctx, d: 24, layers: 1, heads: 2, mlp: 2, act: 'gelu', pos: 'learned', tie: true }, 2);
+  const tr = new LLMTrainer(model, ids, ids, { ...DEFAULT_TRAIN, steps: 300, batch: 16, lr: 1e-2, warmup: 20 }, { train: lineStarts(ids, tok.vocab, ctx, 'start'), val: lineStarts(ids, tok.vocab, ctx, 'start') });
+  while (tr.step < 300) tr.trainStep();
+  const km = { model, tok, align: 'start' as const };
+  const next = suggestWords(km, 'see you ', 3).map((x) => x.word);
+  assert(next.includes('tomorrow') && next.includes('later'), `after "see you": ${next}`);
+  const done = suggestWords(km, 'thank you so mu', 3).map((x) => x.word);
+  assert(done[0] === 'much', `completes "mu": ${done}`);
+  const first = suggestWords(km, '', 3).map((x) => x.word);
+  assert(first.includes('see') && first.includes('thank'), `first words: ${first}`);
+  const known = knownWords(text);
+  const fix = correctWord(km, 'see you ', 'tomorow', known);
+  assert(fix.changed && fix.word === 'tomorrow', `tomorow → ${fix.word}`);
+  const fix2 = correctWord(km, 'i am so ', 'tierd', known);
+  assert(fix2.changed && fix2.word === 'tired', `tierd → ${fix2.word}`);
+  assert(!correctWord(km, 'see you ', 'later', known).changed, 'known words are kept');
+  const cap = correctWord(km, '', 'Thnak', known);
+  assert(cap.changed && cap.word === 'Thank', `keeps the capital: ${cap.word}`);
 });

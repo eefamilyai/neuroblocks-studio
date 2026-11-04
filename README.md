@@ -4,7 +4,7 @@
 
 **Scratch-style blocks (or real code) for machine learning.** Build a robot's senses, actions, brain and rewards, drop it into a 3D world, and watch a neural network learn, with every number under the hood on display. Write your own learning algorithms, run experiments, and export the trained weights as JSON, ONNX or PyTorch.
 
-**…and build your own mini language models.** Switch to **Language** to design a tiny GPT, train it on stories, names, sums or your own text, and take it apart: tokens, attention, embeddings, every weight.
+**…and build your own mini language models.** Switch to **Language** to design a tiny GPT, train it on stories, names, sums, text messages or your own writing, turn it into a phone keyboard that predicts your next word and fixes your typos, and take it apart: tokens, attention, embeddings, every weight.
 
 ### ▶ [Open the studio in your browser](https://eefamilyai.github.io/neuroblocks-studio/)
 
@@ -76,11 +76,15 @@ Press **Language** in the top-left corner. The same studio, now for text: you bu
 <table>
 <tr>
 <td width="50%"><img src="docs/screenshots/llm-train.jpg" alt="Training a story model"><br><b>Training.</b> The loss falls from "random guessing"; live samples go from noise to sentences.</td>
-<td width="50%"><img src="docs/screenshots/llm-playground.jpg" alt="The playground"><br><b>Playground.</b> Every token coloured by how sure the model was; hover for the other candidates.</td>
+<td width="50%"><img src="docs/screenshots/llm-keyboard.jpg" alt="The keyboard"><br><b>Keyboard.</b> Your model as a phone keyboard: next-word suggestions and autocorrect, with the scores behind every choice.</td>
 </tr>
 <tr>
+<td><img src="docs/screenshots/llm-playground.jpg" alt="The playground"><br><b>Playground.</b> Every token coloured by how sure the model was; hover for the other candidates.</td>
 <td><img src="docs/screenshots/llm-attention.jpg" alt="Attention maps"><br><b>Attention.</b> Which earlier tokens each token reads, for every layer and head.</td>
-<td><img src="docs/screenshots/llm-embeddings.jpg" alt="Embedding map"><br><b>Embeddings.</b> The learned token vectors in 2D: vowels, consonants, capitals and punctuation find their own neighbourhoods.</td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/llm-calculator.jpg" alt="Held-out accuracy of the calculator"><br><b>Does it generalise?</b> The calculator gets about 90% of sums it has never seen right.</td>
+<td><img src="docs/screenshots/llm-embeddings.jpg" alt="Embedding map"><br><b>Embeddings.</b> The learned token vectors in 2D, with nearest neighbours.</td>
 </tr>
 </table>
 
@@ -89,6 +93,7 @@ Press **Language** in the top-left corner. The same studio, now for text: you bu
 | | Preset | Trains in* | What you see |
 |---|---|---|---|
 | 📖 | Story writer | 2–5 min | Random letters → words → sentences, in the live samples |
+| ⌨️ | Phone keyboard | 1–3 min | Word prediction and autocorrect on everyday text messages: for messages it never saw, the real next word is among its 3 suggestions about 90% of the time |
 | 🏷️ | Name generator | ~30 s | New names that sound real; train it too long and it starts memorising (validation loss goes up) |
 | ➕ | Calculator | 2–6 min | Learns to add: about 90% of sums it has **never seen** come out right |
 | 🔁 | Copy machine | 2–4 min | Copies and reverses new strings perfectly; one attention head points at exactly the letter to write next |
@@ -99,7 +104,7 @@ Press **Language** in the top-left corner. The same studio, now for text: you bu
 
 **Build it.** The model builder on the left has every choice a real LLM has, at toy scale:
 
-- **Data**: tiny stories, first names, addition problems, copy & reverse puzzles, small Python programs, or **your own text** (paste it or load a `.txt`; it never leaves your browser). The last 10% is kept apart as validation text.
+- **Data**: tiny stories, text messages, first names, addition problems, copy & reverse puzzles, small Python programs, or **your own text** (paste it or load a `.txt`; it never leaves your browser). The last 10% is kept apart as validation text. For lists (names, messages, problems) every line is one example, and training windows line up with the lines: fixed-format tasks start every problem at position 0 (so each digit always sits in the same place), while names and messages keep the line break in front as a "start" token (so the model also learns how a line begins).
 - **Tokenizer**: characters, whole words (rare words spelled out), or **byte-pair encoding** like GPT, with a vocabulary size you choose. The Tokens tab shows how any text is cut up, the whole vocabulary and the BPE merges in the order they were learned.
 - **Architecture**: context length, embedding size, layers, attention heads, MLP width, activation (GELU, ReLU, SiLU), positions (learned, sinusoidal or none) and weight tying, with a live diagram you can click for explanations and the exact number of weights.
 - **Training**: learning rate, batch, steps, warm-up, cosine decay, AdamW weight decay, gradient clipping, validation interval, seed, and **CPU threads**: every batch is split over several background workers whose gradients are added up (data parallelism, the way big models are trained on many GPUs).
@@ -107,6 +112,8 @@ Press **Language** in the top-left corner. The same studio, now for text: you bu
 **Watch it learn.** Train and validation loss against the *random guess* line (ln of the vocabulary size), perplexity, learning rate, gradient norm, tokens per second, live samples every few steps and, for tasks with right answers (sums, copying), the **accuracy on problems it never saw**. Pause, train one step at a time, change the learning rate while it trains, or press Train again after it finishes to keep going.
 
 **Use it.** The playground generates text with temperature, top-k and top-p, colours each token by its probability and shows, for the next token, the full ranking of candidates: click one to choose it yourself. Click any token to see its attention.
+
+**Type with it.** The **Keyboard** tab turns any trained model into a phone keyboard. While you type, it suggests the three most likely next words, or ways to finish the word you started (tap one or press Tab). The model predicts tokens, not words, so a beam search follows the most likely token sequences until each one completes a word. When you finish a word it doesn't know, **autocorrect** looks at known words one or two letters away and picks the one that fits best: the language model's score in this context minus a cost per typo (the classic "noisy channel"). Backspace right after a correction undoes it. Everything it weighs is shown under the box. Train it on your own messages or essays to get a keyboard that writes like you.
 
 **Look inside.** *Attention*: heatmaps for every layer and head (or all heads side by side); follow one token to see what it reads and what it predicts. *Embeddings*: PCA of the token (or position) vectors, with nearest neighbours by cosine similarity. *Model*: where the weights are (embedding, attention, MLP, LayerNorm), and every tensor with its shape, mean, spread and histogram.
 

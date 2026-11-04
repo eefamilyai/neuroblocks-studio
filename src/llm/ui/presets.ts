@@ -36,6 +36,22 @@ export const PRESETS: Preset[] = [
     make: () => base(),
   },
   {
+    id: 'keyboard',
+    emoji: '⌨️',
+    title: 'Phone keyboard',
+    blurb: 'Word prediction and autocorrect, like on a phone. It learns from everyday text messages; then type in the Keyboard tab: it suggests your next word and fixes typos.',
+    time: '≈ 1–3 min',
+    make: () => ({
+      ...base(),
+      name: 'Phone keyboard',
+      data: { dataset: 'messages', seed: 1 },
+      tokenizer: { kind: 'word', vocabSize: 1024 },
+      model: { ctx: 24, d: 64, layers: 2, heads: 4, mlp: 4, act: 'gelu', pos: 'learned', tie: true },
+      train: { ...base().train, batch: 16, steps: 1500, lr: 3e-3, warmup: 100, evalEvery: 100 },
+      sample: { prompt: 'See you', temperature: 0.8, every: 100 },
+    }),
+  },
+  {
     id: 'names',
     emoji: '🏷️',
     title: 'Name generator',
