@@ -10,13 +10,16 @@
     "build:single": "vite build --mode single",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --no-warnings tests/run.ts"
+    "test": "node --experimental-strip-types --no-warnings tests/run.ts",
+    "test:export": "node --experimental-strip-types --no-warnings tests/export.gen.ts tests/.export && python3 tests/verify_export.py tests/.export",
+    "bench": "node --experimental-strip-types --no-warnings tests/bench-mission.ts"
   },
   "dependencies": {
     "blockly": "^13.4.0",
     "three": "^0.187.0"
   },
   "devDependencies": {
+    "@types/node": "^22.20.5",
     "@types/three": "^0.187.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.5",

@@ -213,7 +213,7 @@ function meadow(b: Builder, cx: number, cz: number, rng: RNG): void {
   for (let i = 0; i < 70; i++) {
     const x = cx + rng.uniform(-20, 20);
     const z = cz + rng.uniform(-20, 20);
-    b.decor.push({ kind: rng.next() < 0.5 ? 'flower' : 'tuft', x, y: 0, z, s: rng.uniform(0.6, 1.2), color: [0xffe066, 0xff7eb6, 0xffffff, 0xb28dff][rng.int(4)] });
+    b.decor.push({ kind: rng.next() < 0.5 ? 'flower' : 'tuft', x, y: 0, z, s: rng.uniform(0.6, 1.2), color: [0xffd43b, 0xff6fae, 0xffffff, 0xb28dff, 0xff922b][rng.int(5)] });
   }
   addZone(b, {
     id,

@@ -14,7 +14,7 @@ export const AXIS_PRESETS: Record<AxisKind, { both: ActionAxis; one?: ActionAxis
   kick: { both: { axis: 'kick', options: [0, 1], labels: ['no kick', 'kick'] } },
 };
 
-export function makeSpec(over: Partial<AgentSpec> & { train?: Partial<TrainSpec> } = {}): AgentSpec {
+export function makeSpec(over: Omit<Partial<AgentSpec>, 'train'> & { train?: Partial<TrainSpec> } = {}): AgentSpec {
   const train = { ...defaultTrain(over.train?.algo ?? 'ppo'), ...(over.train ?? {}) };
   const base: AgentSpec = {
     name: 'Robo',
