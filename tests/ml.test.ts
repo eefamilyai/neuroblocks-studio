@@ -2,7 +2,7 @@
  * Numerical gradient checks: compare our hand-written backward passes with
  * finite differences  (f(w+h) − f(w−h)) / 2h.  If backprop is right, they agree.
  */
-import { MLP, ACTIVATIONS } from '../src/ml/nn.ts';
+import { MLP, ACTIVATIONS, denseForward, denseGradInputs, denseGradWeights } from '../src/ml/nn.ts';
 import type { Activation } from '../src/ml/nn.ts';
 import { RNG } from '../src/ml/rng.ts';
 import { Adam } from '../src/ml/optim.ts';
@@ -13,6 +13,48 @@ import { test, assert } from './harness.ts';
 function relErr(a: number, b: number): number {
   return Math.abs(a - b) / Math.max(1e-6, Math.abs(a) + Math.abs(b));
 }
+
+test('tiled dense kernels match the plain textbook loops', () => {
+  const rng = new RNG(7);
+  // odd sizes exercise every remainder path of the 2×4 tiles
+  for (const [B, I, O] of [[1, 1, 1], [1, 6, 32], [3, 5, 7], [16, 51, 64], [37, 33, 31], [64, 12, 1]]) {
+    const W = new Float32Array(O * I).map(() => rng.gauss());
+    const b = new Float32Array(O).map(() => rng.gauss());
+    const x = new Float32Array(B * I).map(() => rng.gauss());
+    const dZ = new Float32Array(B * O).map((_, k) => (k % 5 === 0 ? 0 : rng.gauss()));
+    const z = new Float32Array(B * O);
+    const gW = new Float32Array(O * I).fill(0.5);
+    const gb = new Float32Array(O).fill(0.25);
+    const dX = new Float32Array(B * I).fill(9); // must be overwritten
+    denseForward(W, b, x, z, B, I, O);
+    denseGradWeights(gW, gb, x, dZ, B, I, O);
+    denseGradInputs(W, dZ, dX, B, I, O);
+    let worst = 0;
+    for (let n = 0; n < B; n++)
+      for (let o = 0; o < O; o++) {
+        let s = b[o];
+        for (let i = 0; i < I; i++) s += W[o * I + i] * x[n * I + i];
+        worst = Math.max(worst, Math.abs(s - z[n * O + o]));
+      }
+    for (let o = 0; o < O; o++) {
+      let sb = 0.25;
+      for (let n = 0; n < B; n++) sb += dZ[n * O + o];
+      worst = Math.max(worst, Math.abs(sb - gb[o]));
+      for (let i = 0; i < I; i++) {
+        let s = 0.5;
+        for (let n = 0; n < B; n++) s += dZ[n * O + o] * x[n * I + i];
+        worst = Math.max(worst, Math.abs(s - gW[o * I + i]));
+      }
+    }
+    for (let n = 0; n < B; n++)
+      for (let i = 0; i < I; i++) {
+        let s = 0;
+        for (let o = 0; o < O; o++) s += dZ[n * O + o] * W[o * I + i];
+        worst = Math.max(worst, Math.abs(s - dX[n * I + i]));
+      }
+    assert(worst < 1e-3, `kernels disagree with the plain loops by ${worst} at B=${B} I=${I} O=${O}`);
+  }
+});
 
 for (const act of ACTIVATIONS) {
   test(`MLP gradient check (${act})`, () => {
