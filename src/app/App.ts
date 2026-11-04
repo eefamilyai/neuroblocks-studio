@@ -217,6 +217,17 @@ export class App {
     this.log(`Welcome to NeuroBlocks Studio! Training runs in ${this.client.mode === 'worker' ? 'a background worker thread' : 'the main thread (no Web Worker support)'}.`, 'learn');
     window.addEventListener('beforeunload', () => this.autosave());
     setInterval(() => this.autosave(), 15000);
+    // fetch the on-demand parts in the background once the page is idle: code mode opens
+    // instantly later, and the installed app (service worker cache) also works offline
+    const idle = (f: () => void) => ('requestIdleCallback' in window ? window.requestIdleCallback(f, { timeout: 4000 }) : setTimeout(f, 1000));
+    setTimeout(
+      () =>
+        idle(() => {
+          void this.loadCodeModules().catch(() => {});
+          void import('../ui/lab.ts').catch(() => {});
+        }),
+      6000,
+    );
   }
 
   // =========================================================================
@@ -353,7 +364,10 @@ export class App {
         const [cm, em] = await Promise.all([import('../code/runtime.ts'), import('./codeEditor.ts')]);
         this.codeMod = cm;
         this.editorMod = em;
-      })();
+      })().catch((e) => {
+        this.codeLoading = null; // allow a retry (e.g. when back online)
+        throw e;
+      });
     await this.codeLoading;
   }
 
@@ -362,7 +376,12 @@ export class App {
     const host = this.shell.codeHost;
     const spinner = h('div', { class: 'loading' }, 'Loading the code editor…');
     host.append(spinner);
-    await this.loadCodeModules();
+    try {
+      await this.loadCodeModules();
+    } catch (e) {
+      spinner.textContent = 'Could not load the code editor (are you offline?). Try again in a moment.';
+      throw e;
+    }
     spinner.remove();
     this.codeEditor = this.editorMod!.createCodeEditor(host, {
       doc: this.code,
