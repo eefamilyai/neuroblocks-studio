@@ -37,9 +37,30 @@ const CONCEPTS: [string, string, string][] = [
   ['💾 What are "weights", really?', 'Just numbers: a grid W and a list b for every layer. Export them (JSON, ONNX, PyTorch) and any program can run your robot\'s brain: Python, Unity, a microcontroller…', '🧠 Brain tab → weight matrices; File → Export brain.'],
 ];
 
+/** Language models (the Language studio). */
+const LLM_CONCEPTS: [string, string, string][] = [
+  ['💬 What is a language model?', 'A network that reads some text and predicts the NEXT token. That is all. To write, it predicts, picks one token, appends it, and repeats. ChatGPT works exactly like this, with a much bigger network trained on much more text.', 'Playground → "+1 token": watch one prediction at a time.'],
+  ['✂️ Tokens & tokenizers', 'The model never sees letters, only numbers. A tokenizer cuts text into tokens (characters, words or pieces of words) and gives each one an id. The list of all tokens is the vocabulary.', 'Tokens tab: type anything and see it cut up.'],
+  ['🧩 Byte-pair encoding (BPE)', 'GPT\'s tokenizer. Start from single characters and repeatedly glue together the pair that appears most often ("t"+"h" → "th", "th"+"e" → "the"…). Common words become one token, rare words are spelled with pieces. Fewer tokens per sentence = the model sees more text at once.', 'Tokenizer → BPE, then Tokens tab → merges.'],
+  ['📍 Embeddings', 'Token id 7 becomes row 7 of a learned table: a vector of numbers. Training moves tokens that are used in similar ways close together: vowels, digits, punctuation, capital letters each form their own neighbourhood.', 'Embeddings tab: click a token to see its neighbours.'],
+  ['🧭 Position embeddings', 'Attention by itself cannot tell "dog bites man" from "man bites dog": it has no sense of order. Adding a different vector for every position fixes that. Learned (a trained table) or sinusoidal (fixed waves, from the original Transformer paper).', 'Builder → Positions → "none", and watch it struggle.'],
+  ['👀 Self-attention', 'Every token makes a query ("what am I looking for?"), a key ("what do I offer?") and a value ("what I pass on"). It mixes the values of earlier tokens, weighted by softmax(query·key / √d). Several heads look for different things at the same time.', 'Attention tab: each row is one token deciding what to read.'],
+  ['🚫 The causal mask', 'When predicting the next token, peeking at it would be cheating. So a token may only attend to itself and EARLIER tokens: the upper half of every attention map is blacked out.', 'Attention tab: everything above the diagonal is black.'],
+  ['🧱 The transformer block', 'LayerNorm → attention → add the result back (residual), then LayerNorm → MLP → add back. Stack a few of these. The "residual stream" carries information straight through, which is why transformers can be made very deep.', 'Builder → Architecture: click every box.'],
+  ['🎯 Cross-entropy loss', 'loss = −log(probability the model gave to the real next token). A perfect prediction gives 0; random guessing among V tokens gives ln(V). Training = making the real next token more and more likely.', 'Training tab: the dashed "random guess" line.'],
+  ['🤔 Perplexity', 'e^loss. A perplexity of 4 means the model is as unsure as if it had to choose between 4 equally likely tokens every time. Lower is better; 1 would be a mind reader.', 'Training tab → Perplexity.'],
+  ['🌡️ Temperature, top-k & top-p', 'How to pick from the probabilities. Temperature divides the scores: low = always the safest token (boring, repetitive), high = wild. Top-k only keeps the k most likely tokens; top-p keeps the smallest set that covers p of the probability.', 'Playground sliders: the "next token" bars change live.'],
+  ['🧪 Validation & overfitting', 'Part of the text is never used for training. If the training loss keeps falling but the validation loss rises, the model is memorising instead of learning. Small data + big model = memorising.', 'Calculator preset: can it add sums it has never seen?'],
+  ['📈 Warm-up, cosine decay, AdamW, clipping', 'The recipe real LLMs are trained with: start with a tiny learning rate (warm-up), then slowly decay it (cosine); AdamW gives every weight its own step size plus a little weight decay; clipping caps sudden huge gradients.', 'Training tab → learning-rate and gradient-norm charts.'],
+  ['🧵 Data parallelism', 'Split every batch over several workers, compute the gradients in parallel, add them up: the same update, faster. Big LLMs train like this on thousands of GPUs; here it is your CPU cores.', 'Builder → Training → CPU threads.'],
+  ['🔧 Fine-tuning', 'Take a trained model and keep training it on new text: it keeps its general skills and picks up the new style. That is how base models become chat assistants or code helpers.', 'Train a story model, then "Train on your own text" → Fine-tune.'],
+  ['⚡ The KV cache', 'Generating token 200 should not redo the work for tokens 1–199. Each layer remembers the keys and values of earlier tokens, so a new token only computes its own. Every chatbot does this.', 'src/llm/decode.ts'],
+  ['📐 Scale', 'Your model: about 100,000 weights and a context of 64 tokens. GPT-2 small: 124 million weights, 1,024 tokens. GPT-3: 175 billion. Same blocks, same loss, same training loop: mostly just bigger, and trained on far more text.', 'Model tab: where the weights are.'],
+];
+
 export class LearnPanel {
   readonly el: HTMLElement;
-  constructor(openMissions: () => void, openLab: () => void) {
+  constructor(openMissions: () => void, openLab: () => void, mode: 'robots' | 'language' = 'robots') {
     const path: [string, (() => void) | null][] = [
       ['Neuron Lab (top bar): see a network learn to separate dots, the basics of all ML.', openLab],
       ['Mission "First Steps": press Train and watch the reward curve rise.', openMissions],
@@ -51,13 +72,32 @@ export class LearnPanel {
       ['Experiments tab: sweep the learning rate, see why hyperparameters matter.', null],
       ['Switch the editor to Code: write your own rewards, senses and levels, then export the brain.', null],
     ];
+    const llmPath = [
+      'Story writer: press Train and watch the live samples go from random letters to words to sentences.',
+      'Playground: generate with temperature 0.2, then 1.5. Use "+1 token" and pick tokens yourself.',
+      'Tokens tab: switch the tokenizer between Characters and BPE and compare.',
+      'Copy machine preset: open the Attention tab and find the head that points at the letter to copy.',
+      'Calculator preset: does it learn to ADD sums it never saw, or only memorise?',
+      'Train on your own text, then fine-tune a trained model on something new.',
+      'Export → Python script, and run your model with NumPy or PyTorch.',
+    ];
+    const concepts = (list: [string, string, string][]) => h('div', { class: 'concepts' }, ...list.map(([t, p, see]) => h('details', { class: 'concept' }, h('summary', null, t), h('p', null, p), h('div', { class: 'see' }, see))));
+    const robots = [
+      h('h3', { class: 'h-sub', style: { marginTop: mode === 'robots' ? '0' : undefined } }, 'Robots: suggested path'),
+      h('ol', { class: 'path-list' }, ...path.map(([t, go]) => h('li', null, go ? h('a', { href: '#', onclick: (e: Event) => (e.preventDefault(), go()) }, t) : t))),
+      h('h3', { class: 'h-sub' }, 'Robots: concepts'),
+      concepts(CONCEPTS),
+    ];
+    const language = [
+      h('h3', { class: 'h-sub', style: { marginTop: mode === 'language' ? '0' : undefined } }, 'Language models: suggested path'),
+      h('ol', { class: 'path-list' }, ...llmPath.map((t) => h('li', null, t))),
+      h('h3', { class: 'h-sub' }, 'Language models: concepts'),
+      concepts(LLM_CONCEPTS),
+    ];
     this.el = h(
       'div',
       null,
-      h('h3', { class: 'h-sub', style: { marginTop: '0' } }, 'Suggested path'),
-      h('ol', { class: 'path-list' }, ...path.map(([t, go]) => h('li', null, go ? h('a', { href: '#', onclick: (e: Event) => (e.preventDefault(), go()) }, t) : t))),
-      h('h3', { class: 'h-sub' }, 'Concepts'),
-      h('div', { class: 'concepts' }, ...CONCEPTS.map(([t, p, see]) => h('details', { class: 'concept' }, h('summary', null, t), h('p', null, p), h('div', { class: 'see' }, see)))),
+      ...(mode === 'language' ? [...language, ...robots] : [...robots, ...language]),
     );
   }
 }

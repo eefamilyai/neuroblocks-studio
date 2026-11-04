@@ -13,6 +13,8 @@ export interface LLMProject {
     seed: number;
     /** your own text (dataset = 'custom') */
     text?: string;
+    /** your own text: every line is one example (training windows start at line beginnings) */
+    align?: boolean;
   };
   tokenizer: { kind: TokenizerKind; vocabSize: number };
   model: Omit<GPTConfig, 'vocab'>;
@@ -36,18 +38,32 @@ export type ToLLM =
       project: LLMProject;
       text: string;
       valStart?: number;
+      /** windows start at line beginnings (every line is one example) */
+      align?: boolean;
       /** continue from a trained model (its tokenizer is reused) */
       init?: { tokenizer: TokenizerJSON; weights: Float32Array[]; step: number; tokens: number } | null;
       stepOnly?: boolean;
+      /** echoed in every reply, so replies from an older run can be told apart */
+      run?: number;
     }
   | { type: 'pause' }
   | { type: 'resume' }
   | { type: 'step' }
   | { type: 'stop' }
-  | { type: 'threads'; n: number };
+  /** change training / sampling settings while training (the model keeps its weights and optimiser state) */
+  | { type: 'config'; train: LLMTrainConfig; sample: LLMProject['sample'] }
+  /** helper workers for multi-threaded training (one port each; none = one thread) */
+  | { type: 'helpers'; ports: MessagePort[] };
 
-export type FromLLM =
-  | { type: 'ready'; tokenizer: TokenizerJSON; stats: LLMStats; step: number }
+export type FromLLM = (
+  | {
+      type: 'ready';
+      tokenizer: TokenizerJSON;
+      stats: LLMStats;
+      step: number;
+      /** the dataset has a task with right answers: its accuracy is measured with the validation loss */
+      probe: { name: string; help: string } | null;
+    }
   | {
       type: 'progress';
       step: number;
@@ -55,6 +71,8 @@ export type FromLLM =
       /** (step, loss) pairs since the last message */
       losses: [number, number][];
       vals: [number, number][];
+      /** (step, accuracy 0…1) on held-out test cases, if the dataset has them */
+      accs: [number, number][];
       lr: number;
       gradNorm: number;
       tokPerSec: number;
@@ -66,4 +84,5 @@ export type FromLLM =
   | { type: 'log'; level: 'info' | 'warn' | 'err' | 'good'; msg: string }
   | { type: 'error'; msg: string }
   | { type: 'paused'; reason: string }
-  | { type: 'finished'; reason: string };
+  | { type: 'finished'; reason: string }
+) & { run?: number };

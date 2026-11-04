@@ -4,10 +4,12 @@
 
 **Scratch-style blocks (or real code) for machine learning.** Build a robot's senses, actions, brain and rewards, drop it into a 3D world, and watch a neural network learn, with every number under the hood on display. Write your own learning algorithms, run experiments, and export the trained weights as JSON, ONNX or PyTorch.
 
+**…and build your own mini language models.** Switch to **Language** to design a tiny GPT, train it on stories, names, sums or your own text, and take it apart: tokens, attention, embeddings, every weight.
+
 ### ▶ [Open the studio in your browser](https://eefamilyai.github.io/neuroblocks-studio/)
 
 Runs entirely in your browser. No install, no server, no account.<br>
-The neural network, backpropagation, PPO, DQN, REINFORCE, neuroevolution and the physics are all written from scratch in TypeScript: no ML libraries, nothing hidden.
+The neural networks, backpropagation, PPO, DQN, REINFORCE, neuroevolution, the transformer, the tokenizers and the physics are all written from scratch in TypeScript: no ML libraries, nothing hidden.
 
 ![NeuroBlocks Studio training a robot to reach a flag](docs/screenshots/hero.jpg)
 
@@ -34,6 +36,7 @@ The neural network, backpropagation, PPO, DQN, REINFORCE, neuroevolution and the
 | 💾 **Export** | **JSON** (re-importable), **ONNX** (Netron, onnxruntime, Unity Sentis…), a standalone **PyTorch/NumPy `.py`**, training logs as **CSV**, the program as **.js**. Exports are tested to reproduce the browser's outputs to about 1e‑7. |
 | 🧪 **Neuron Lab** | Supervised learning playground: a network separates 2D data (circle, XOR, spiral, moons…) or **points you draw yourself**. Watch the decision boundary bend; play with features, layers, learning rate, optimizer, batch size, L2 regularisation and the train/test split. |
 | 🎯 **17 missions** | Ready-made, editable programs, from "reach the flag in 15 seconds" to soccer, racing with smooth controls, mazes, parkour and crate pushing. They open as blocks or as code. |
+| 💬 **Mini language models** | A second studio for **tiny GPTs**: choose the training text, the tokenizer (characters, words or GPT-style BPE), the architecture and the training recipe, then train in background workers on several CPU cores. Generate text in a playground that colours every token by the model's confidence, and look at attention maps, the embedding space and every weight matrix. [More below](#mini-language-models). |
 
 <table>
 <tr>
@@ -65,6 +68,61 @@ The neural network, backpropagation, PPO, DQN, REINFORCE, neuroevolution and the
 7. New to neural networks? Start with the **Lab** in the top bar.
 
 Keyboard: `Ctrl+Enter` train/pause · `Ctrl+S` save · `Ctrl+Space` code suggestions · in "You" mode `WASD`/arrows drive, `Space` jump, `F` kick, `Q`/`E` slide · in build mode `R` rotate, `Del` delete, `Esc` deselect.
+
+## Mini language models
+
+Press **Language** in the top-left corner. The same studio, now for text: you build a **tiny GPT**, train it in your browser and look at everything it does.
+
+<table>
+<tr>
+<td width="50%"><img src="docs/screenshots/llm-train.jpg" alt="Training a story model"><br><b>Training.</b> The loss falls from "random guessing"; live samples go from noise to sentences.</td>
+<td width="50%"><img src="docs/screenshots/llm-playground.jpg" alt="The playground"><br><b>Playground.</b> Every token coloured by how sure the model was; hover for the other candidates.</td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/llm-attention.jpg" alt="Attention maps"><br><b>Attention.</b> Which earlier tokens each token reads, for every layer and head.</td>
+<td><img src="docs/screenshots/llm-embeddings.jpg" alt="Embedding map"><br><b>Embeddings.</b> The learned token vectors in 2D: vowels, consonants, capitals and punctuation find their own neighbourhoods.</td>
+</tr>
+</table>
+
+**Start from a preset** (top bar → Presets), press **Train**, and watch:
+
+| | Preset | Trains in* | What you see |
+|---|---|---|---|
+| 📖 | Story writer | 2–5 min | Random letters → words → sentences, in the live samples |
+| 🏷️ | Name generator | ~30 s | New names that sound real; train it too long and it starts memorising (validation loss goes up) |
+| ➕ | Calculator | 2–6 min | Learns to add: about 90% of sums it has **never seen** come out right |
+| 🔁 | Copy machine | 2–4 min | Copies and reverses new strings perfectly; one attention head points at exactly the letter to write next |
+| 🐍 | Code helper | 2–5 min | A miniature code model: colons, indentation, `return` |
+| 🧩 | Story writer with BPE | 2–5 min | The same stories with GPT-style tokens |
+
+<sub>* The shorter time with several CPU threads (the default on a 4-core computer), the longer one on a single thread.</sub>
+
+**Build it.** The model builder on the left has every choice a real LLM has, at toy scale:
+
+- **Data**: tiny stories, first names, addition problems, copy & reverse puzzles, small Python programs, or **your own text** (paste it or load a `.txt`; it never leaves your browser). The last 10% is kept apart as validation text.
+- **Tokenizer**: characters, whole words (rare words spelled out), or **byte-pair encoding** like GPT, with a vocabulary size you choose. The Tokens tab shows how any text is cut up, the whole vocabulary and the BPE merges in the order they were learned.
+- **Architecture**: context length, embedding size, layers, attention heads, MLP width, activation (GELU, ReLU, SiLU), positions (learned, sinusoidal or none) and weight tying, with a live diagram you can click for explanations and the exact number of weights.
+- **Training**: learning rate, batch, steps, warm-up, cosine decay, AdamW weight decay, gradient clipping, validation interval, seed, and **CPU threads**: every batch is split over several background workers whose gradients are added up (data parallelism, the way big models are trained on many GPUs).
+
+**Watch it learn.** Train and validation loss against the *random guess* line (ln of the vocabulary size), perplexity, learning rate, gradient norm, tokens per second, live samples every few steps and, for tasks with right answers (sums, copying), the **accuracy on problems it never saw**. Pause, train one step at a time, change the learning rate while it trains, or press Train again after it finishes to keep going.
+
+**Use it.** The playground generates text with temperature, top-k and top-p, colours each token by its probability and shows, for the next token, the full ranking of candidates: click one to choose it yourself. Click any token to see its attention.
+
+**Look inside.** *Attention*: heatmaps for every layer and head (or all heads side by side); follow one token to see what it reads and what it predicts. *Embeddings*: PCA of the token (or position) vectors, with nearest neighbours by cosine similarity. *Model*: where the weights are (embedding, attention, MLP, LayerNorm), and every tensor with its shape, mean, spread and histogram.
+
+**Keep it.** Save the model (weights + tokenizer + settings) to a file and open it later; it is also autosaved in the browser. **Fine-tune**: train a model on one text, switch to another and press Train: it keeps what it knows and adapts. **Export** a single Python file:
+
+```bash
+python story_writer.py "Once upon a time"     # NumPy only: tokenizer, transformer and sampling, all in plain code
+```
+
+```python
+from story_writer import generate, torch_model
+print(generate("Once upon a time", n=300, temperature=0.8))
+model = torch_model()   # the same network as a PyTorch nn.Module with the trained weights, ready to keep training
+```
+
+The export is tested: the Python forward pass reproduces the browser's next-token scores to about 1e‑7.
 
 ## Code mode in 30 seconds
 
@@ -149,6 +207,7 @@ code (JavaScript) ┘              │                │                       
 | [`src/render/`](src/render) | Three.js world (per-zone chunks), robot, objects, ghosts, rays, heatmap and value map; adaptive render quality. |
 | [`src/ui/`](src/ui) | Panels (training, brain, senses, math, code), charts, Neuron Lab, icons. |
 | [`src/export/`](src/export) | ONNX writer (a tiny protobuf encoder) and the PyTorch script generator. |
+| [`src/llm/`](src/llm) | The mini language models: a decoder-only transformer with hand-written backpropagation through attention, LayerNorm, GELU and the tied output head (`gpt.ts`), KV-cache text generation and sampling (`decode.ts`), character / word / BPE tokenizers (`tokenizer.ts`), the generated datasets, the AdamW trainer with warm-up and cosine decay (`train.ts`), multi-core data-parallel training (`parallel.ts`), held-out accuracy (`probe.ts`) and the Python export. The UI is in [`src/llm/ui/`](src/llm/ui). |
 
 Physics runs at 60 Hz and the brain decides at 20 Hz (every 3 physics ticks) by default, like most robot-learning setups.
 
@@ -156,6 +215,7 @@ Physics runs at 60 Hz and the brain decides at 20 Hz (every 3 physics ticks) by 
 
 - **Training** runs in a background worker. The first mission trains at roughly 15,000 environment steps per second on our test machine (about 2.5× faster than the first version), bigger networks proportionally slower.
 - **The 3D view** adapts: in *Auto* quality it lowers the render resolution (and, if needed, turns shadows off) when frames get slow, redraws shadows every other frame, and slows to a few frames per second when nothing moves. Settings let you pick High/Medium/Low and cap the frame rate.
+- **Language models** train at about 2,500 tokens per second on one CPU thread for the 100,000-weight story model. Splitting each batch over several threads (the default is one less than your number of cores, at most 4) made it about 2.4× faster with 3 threads and 2.8× with 4 on our 4-core test machine. The language studio is its own file, loaded the first time you open it.
 - **Loading**: the code editor, the Lab and the training worker are separate files, downloaded only when needed.
 
 ## Using an exported brain
@@ -187,8 +247,8 @@ npm run dev            # http://localhost:5173
 ```
 
 ```bash
-npm test               # gradient checks, physics, every mission (blocks and code), code-mode errors, your-own-algorithm learning…
-npm run test:export    # exports brains and checks them with onnx.checker + onnxruntime (needs: pip install onnx onnxruntime numpy)
+npm test               # gradient checks (MLPs and the whole transformer), physics, every mission, code-mode errors, tokenizers, a tiny GPT learning…
+npm run test:export    # exports brains and language models and checks them with onnxruntime / NumPy (needs: pip install onnx onnxruntime numpy)
 npm run build          # static site in dist/
 npm run build:single   # ONE self-contained HTML file in dist-single/ (works offline, double-click to open)
 npm run bench -- soccer 1000000   # train a mission headlessly in Node and print its learning curve

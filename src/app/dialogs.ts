@@ -9,7 +9,7 @@ import type { IconName } from '../ui/icons.ts';
 import { missionsDone, setWelcomeSeen } from '../project/storage.ts';
 import { LearnPanel } from '../ui/learnPanel.ts';
 
-export function openWelcome(o: { startFirst: () => void; missions: () => void; code: () => void }): void {
+export function openWelcome(o: { startFirst: () => void; missions: () => void; code: () => void; language: () => void }): void {
   setWelcomeSeen();
   const step = (n: IconName, title: string, text: string) => h('div', { class: 'welcome-step' }, h('span', { class: 'n' }, icon(n)), h('div', null, h('b', null, title), h('p', null, text)));
   const m = modal(
@@ -26,7 +26,13 @@ export function openWelcome(o: { startFirst: () => void; missions: () => void; c
         step('play', '3 · Train & watch', '16 copies of your robot train in parallel (the ghosts). The robot you see always uses the newest brain. Take the controls with "You".'),
         step('chart', '4 · Under the hood', 'Right. Learning curves, every neuron and weight, the exact sensor numbers, the maths, experiments. Export the trained brain as JSON, ONNX or PyTorch.'),
       ),
-      h('p', { class: 'small muted', style: { margin: '0' } }, 'Everything (neural network, backpropagation, PPO, DQN, evolution, physics) is written from scratch in TypeScript and runs in your browser. No servers, no ML libraries, nothing hidden.'),
+      h(
+        'button',
+        { class: 'welcome-llm', type: 'button', onclick: () => (m.close(), o.language()) },
+        h('span', { class: 'n' }, icon('chat')),
+        h('div', null, h('b', null, 'New: build mini language models'), h('p', null, 'Switch to Language (top left) to design and train your own tiny GPT on stories, names, sums or your own text, and see its tokens, attention and embeddings.')),
+      ),
+      h('p', { class: 'small muted', style: { margin: '0' } }, 'Everything (neural networks, backpropagation, PPO, DQN, evolution, transformers, physics) is written from scratch in TypeScript and runs in your browser. No servers, no ML libraries, nothing hidden.'),
     ),
     {
       foot: [
@@ -106,11 +112,12 @@ export function openMissions(world: WorldDef, o: { load: (m: Mission) => void; f
   setTimeout(() => search.focus(), 50);
 }
 
-export function openLearn(openMissions: () => void, openLab: () => void): void {
+export function openLearn(openMissions: () => void, openLab: () => void, mode: 'robots' | 'language' = 'robots'): void {
   let close: () => void = () => {};
   const panel = new LearnPanel(
     () => (close(), openMissions()),
     () => (close(), openLab()),
+    mode,
   );
   const m = modal('Learn: the ideas behind it all', panel.el, { size: 'narrow' });
   close = m.close;
@@ -302,6 +309,24 @@ export function confirmDialog(title: string, text: string, ok = 'OK', danger = f
       size: 'narrow',
       foot: [btn({ label: 'Cancel', cls: 'ghost', onclick: () => done(false) }), btn({ label: ok, cls: danger ? 'danger' : 'primary', onclick: () => done(true) })],
       onClose: () => done(false),
+    });
+  });
+}
+
+/** Ask the user to pick one of several options (null = cancelled). */
+export function choiceDialog<T extends string>(title: string, text: string, options: { value: T; label: string; primary?: boolean }[]): Promise<T | null> {
+  return new Promise((resolve) => {
+    let decided = false;
+    const done = (v: T | null) => {
+      if (decided) return;
+      decided = true;
+      m.close();
+      resolve(v);
+    };
+    const m = modal(title, h('p', { class: 'dim', style: { margin: 0 } }, text), {
+      size: 'narrow',
+      foot: [btn({ label: 'Cancel', cls: 'ghost', onclick: () => done(null) }), ...options.map((o) => btn({ label: o.label, cls: o.primary ? 'primary' : '', onclick: () => done(o.value) }))],
+      onClose: () => done(null),
     });
   });
 }

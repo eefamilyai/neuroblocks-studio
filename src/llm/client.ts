@@ -6,8 +6,15 @@ import LLMWorker from '@llm-worker';
 import { LLMHost } from './host.ts';
 import type { FromLLM, ToLLM } from './protocol.ts';
 
+/** A sensible default: leave one core for the page, use at most 4. */
+export function defaultThreads(): number {
+  const cores = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 2 : 2;
+  return Math.max(1, Math.min(4, cores - 1));
+}
+
 export class LLMClient {
   private worker: Worker | null = null;
+  private helpers: Worker[] = [];
   private local: LLMHost | null = null;
   private alive = false;
   private pending: ToLLM[] = [];
@@ -38,6 +45,8 @@ export class LLMClient {
 
   private fallBack(): void {
     if (this.local) return;
+    for (const w of this.helpers) w.terminate();
+    this.helpers = [];
     this.worker?.terminate();
     this.worker = null;
     this.mode = 'main-thread';
@@ -71,7 +80,34 @@ export class LLMClient {
     else this.raf = requestAnimationFrame(run);
   }
 
+  /**
+   * Train on n threads: the training worker plus n − 1 helper workers, each
+   * connected to it by a MessageChannel. (No helpers without workers.)
+   */
+  setThreads(n: number): number {
+    for (const w of this.helpers) w.terminate();
+    this.helpers = [];
+    if (!this.worker) return 1;
+    const ports: MessagePort[] = [];
+    for (let i = 1; i < n; i++) {
+      try {
+        const w = new LLMWorker();
+        const ch = new MessageChannel();
+        w.postMessage({ type: 'helper', port: ch.port1 }, [ch.port1]);
+        ports.push(ch.port2);
+        this.helpers.push(w);
+      } catch {
+        break;
+      }
+    }
+    // sent directly (ports must be transferred, and can't be replayed on the main-thread fallback)
+    this.worker.postMessage({ type: 'helpers', ports } satisfies ToLLM, ports);
+    return 1 + ports.length;
+  }
+
   terminate(): void {
+    for (const w of this.helpers) w.terminate();
+    this.helpers = [];
     this.worker?.terminate();
     this.worker = null;
     this.local = null;

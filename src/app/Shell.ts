@@ -8,6 +8,7 @@ import { icon } from '../ui/icons.ts';
 import type { IconName } from '../ui/icons.ts';
 
 export type Tab = 'train' | 'brain' | 'senses' | 'math' | 'code' | 'experiments';
+export type AppMode = 'robots' | 'language';
 export type EditorMode = 'blocks' | 'code';
 export type LogLevel = 'info' | 'warn' | 'err' | 'good' | 'learn';
 
@@ -26,6 +27,7 @@ export interface ShellActions {
   setTab(t: Tab): void;
   toggleProblems(): void;
   layoutChanged(): void;
+  setAppMode(m: AppMode): void;
 }
 
 const TABS: [Tab, string, IconName, string][] = [
@@ -70,6 +72,16 @@ export class Shell {
   private tabBtns = new Map<Tab, HTMLElement>();
   private tabBodies = new Map<Tab, HTMLElement>();
   tab: Tab = 'train';
+  // app modes: robots (this file) and language models (filled in by the LLM studio)
+  private appSeg: { el: HTMLElement; set: (v: AppMode) => void };
+  private robotLeft: HTMLElement;
+  private robotRight: HTMLElement;
+  private mobile: HTMLElement;
+  /** top-bar slots and workspace host for the language-model studio */
+  readonly llmLeft: HTMLElement;
+  readonly llmRight: HTMLElement;
+  readonly llmHost: HTMLElement;
+  appMode: AppMode = 'robots';
 
   constructor(root: HTMLElement, a: ShellActions) {
     this.root = root;
@@ -95,22 +107,42 @@ export class Shell {
     this.stats = { steps: sSteps, episodes: sEps, reward: sRew, success: sSucc, sps: sSps };
     this.exportBtn = btn({ icon: 'download', label: 'Export', cls: 'sm', title: 'Export the brain (JSON, ONNX, PyTorch) or training logs', onclick: () => a.exportMenu(this.exportBtn) });
     const moreBtn = btn({ icon: 'more', cls: 'ghost sm', title: 'Settings, help, keyboard shortcuts', onclick: () => a.moreMenu(moreBtn) });
-    const topbar = h(
-      'header',
-      { class: 'topbar' },
-      h('div', { class: 'brand', title: 'NeuroBlocks Studio' }, h('span', { class: 'mark' }, icon('brain')), h('span', { class: 'word' }, 'NeuroBlocks')),
-      h('div', { class: 'tb-sep opt' }),
+    this.appSeg = seg<AppMode>(
+      [
+        { value: 'robots', icon: 'bot', label: 'Robots', title: 'Robots that learn by trial and error in a 3D world (reinforcement learning)' },
+        { value: 'language', icon: 'chat', label: 'Language', title: 'Build and train mini language models (tiny GPTs) on text' },
+      ],
+      (m) => a.setAppMode(m),
+      'app-modes',
+    );
+    this.robotLeft = h(
+      'div',
+      { class: 'tb-group' },
       projectBtn,
       h('div', { class: 'tb-sep' }),
       h('div', { class: 'run-group' }, this.trainBtn, this.stepBtn, this.stopBtn, this.resetBtn),
       h('div', { class: 'status' }, h('div', { class: 'phase', title: 'What the learning algorithm is doing right now' }, this.dot, this.phase), eSteps, eEps, eRew, eSucc, eSps),
+    );
+    this.robotRight = h('div', { class: 'tb-group' }, btn({ icon: 'target', label: 'Missions', cls: 'ghost sm tb-btn', title: 'Ready-made missions and the zones of the world', onclick: () => a.missions() }));
+    this.llmLeft = h('div', { class: 'tb-group hidden' });
+    this.llmRight = h('div', { class: 'tb-group hidden' });
+    const topbar = h(
+      'header',
+      { class: 'topbar' },
+      h('div', { class: 'brand', title: 'NeuroBlocks Studio' }, h('span', { class: 'mark' }, icon('brain')), h('span', { class: 'word' }, 'NeuroBlocks')),
+      this.appSeg.el,
+      h('div', { class: 'tb-sep opt' }),
+      this.robotLeft,
+      this.llmLeft,
       h('div', { class: 'spacer' }),
-      btn({ icon: 'target', label: 'Missions', cls: 'ghost sm tb-btn', title: 'Ready-made missions and the zones of the world', onclick: () => a.missions() }),
+      this.robotRight,
+      this.llmRight,
       btn({ icon: 'flask', label: 'Lab', cls: 'ghost sm tb-btn', title: 'Neuron Lab: watch a network learn to classify points (supervised learning)', onclick: () => a.lab() }),
       btn({ icon: 'learn', label: 'Learn', cls: 'ghost sm tb-btn', title: 'The ideas behind it all, and a suggested path', onclick: () => a.learn() }),
       this.exportBtn,
       moreBtn,
     );
+    this.appSeg.set('robots');
 
     // ------------------------------------------------------------ editor pane
     this.modeSeg = seg<EditorMode>(
@@ -180,16 +212,29 @@ export class Shell {
     const sp2 = h('div', { class: 'splitter' });
     this.workspace = h('main', { class: 'workspace', 'data-mobile': 'world' }, this.editorPane, sp1, this.worldPane, sp2, this.inspector);
     const mobile = h('div', { class: 'mobile-tabs' });
+    this.mobile = mobile;
     for (const [k, l, ic] of [
       ['editor', 'Program', 'puzzle'],
       ['world', 'World', 'map'],
       ['inspector', 'Inspect', 'chart'],
     ] as const)
       mobile.append(btn({ icon: ic, label: l, cls: 'sm', onclick: () => this.mobileShow(k) }));
-    root.append(topbar, mobile, this.workspace);
+    this.llmHost = h('div', { class: 'mode-host hidden' });
+    root.append(topbar, mobile, this.workspace, this.llmHost);
     makeSplitter(sp1, this.editorPane, { dir: 1, axis: 'x', min: 260, max: () => window.innerWidth * 0.6, key: 'nb.w.editor', onResize: () => a.layoutChanged() });
     makeSplitter(sp2, this.inspector, { dir: -1, axis: 'x', min: 280, max: () => window.innerWidth * 0.55, key: 'nb.w.inspector', onResize: () => a.layoutChanged() });
     makeSplitter(hsplit, this.dock, { dir: -1, axis: 'y', min: 60, max: () => this.worldPane.clientHeight * 0.7, key: 'nb.h.dock', onResize: () => a.layoutChanged() });
+  }
+
+  /** Switch between the robot studio and the language-model studio. */
+  setAppMode(m: AppMode): void {
+    this.appMode = m;
+    this.appSeg.set(m);
+    const robots = m === 'robots';
+    for (const el of [this.robotLeft, this.robotRight, this.workspace, this.mobile]) el.classList.toggle('hidden', !robots);
+    for (const el of [this.llmLeft, this.llmRight, this.llmHost]) el.classList.toggle('hidden', robots);
+    this.exportBtn.title = robots ? 'Export the brain (JSON, ONNX, PyTorch) or training logs' : 'Export the language model (Python script, weights) or the training log';
+    document.body.dataset.mode = m;
   }
 
   mobileShow(k: 'editor' | 'world' | 'inspector'): void {

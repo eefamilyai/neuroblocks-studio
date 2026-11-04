@@ -14,8 +14,27 @@ import { RNG } from '../ml/rng.ts';
 import type { GPT } from './gpt.ts';
 import { activate, layerNormForward } from './gpt.ts';
 
+/** Which token ids contain a line break (for windows that should start at a line). */
+export function lineBreakTable(vocab: string[]): Uint8Array {
+  return Uint8Array.from(vocab, (v) => (v.includes('\n') ? 1 : 0));
+}
+
+/**
+ * Where to start a window of at most `max` tokens that ends at the end of
+ * `tokens`. With `breaks` (one example per line), it starts at the earliest
+ * line start that fits, like the training windows; otherwise as early as fits.
+ */
+export function windowStart(tokens: ArrayLike<number>, max: number, breaks: Uint8Array | null): number {
+  const first = Math.max(0, tokens.length - max);
+  if (!breaks || first === 0) return first;
+  for (let i = first; i < tokens.length; i++) if (breaks[tokens[i - 1]]) return i;
+  return first;
+}
+
 export class Decoder {
   readonly model: GPT;
+  /** set for one-example-per-line data: when the window is full it slides to a line start */
+  lineBreaks: Uint8Array | null = null;
   private kc: Float32Array[];
   private vc: Float32Array[];
   pos = 0;
@@ -69,8 +88,17 @@ export class Decoder {
     const m = this.model;
     const { ctx, d, heads: H, mlp, act } = m.cfg;
     if (this.pos >= ctx) {
-      // window full: keep the newest half, recompute their keys/values from position 0
-      const keep = this.tokens.slice(this.tokens.length - Math.floor(ctx / 2));
+      // window full: keep the newest half (or, for line-by-line data, everything from the
+      // earliest line start that leaves room), recompute their keys/values from position 0
+      let from = this.tokens.length - Math.floor(ctx / 2);
+      if (this.lineBreaks) {
+        const n = this.tokens.length;
+        const ls = windowStart(this.tokens, ctx - 1, this.lineBreaks);
+        // the window ends with a line break: the new line starts fresh at position 0
+        if (this.lineBreaks[this.tokens[n - 1]]) from = n;
+        else if (ls > 0 && this.lineBreaks[this.tokens[ls - 1]]) from = ls;
+      }
+      const keep = this.tokens.slice(from);
       this.reset();
       for (const t of keep) this.step(t);
     }
@@ -144,9 +172,35 @@ export function softmaxT(logits: ArrayLike<number>, temperature = 1): Float32Arr
 
 /** The k most likely tokens: [id, probability][] (highest first). */
 export function topK(probs: ArrayLike<number>, k: number): [number, number][] {
-  const idx = Array.from({ length: probs.length }, (_, i) => i);
-  idx.sort((a, b) => probs[b] - probs[a]);
-  return idx.slice(0, k).map((i) => [i, probs[i]]);
+  const n = probs.length;
+  k = Math.max(0, Math.min(k, n));
+  if (k * 8 >= n) {
+    const idx = Array.from({ length: n }, (_, i) => i);
+    idx.sort((a, b) => probs[b] - probs[a]);
+    return idx.slice(0, k).map((i) => [i, probs[i]]);
+  }
+  // small k: keep a sorted list of the best k (insertion), one pass over the vocabulary
+  const ids: number[] = [];
+  const ps: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const p = probs[i];
+    if (ids.length === k && p <= ps[k - 1]) continue;
+    let j = ids.length < k ? ids.length : k - 1;
+    while (j > 0 && ps[j - 1] < p) {
+      if (j < k) {
+        ids[j] = ids[j - 1];
+        ps[j] = ps[j - 1];
+      }
+      j--;
+    }
+    ids[j] = i;
+    ps[j] = p;
+    if (ids.length > k) {
+      ids.length = k;
+      ps.length = k;
+    }
+  }
+  return ids.map((id, j) => [id, ps[j]]);
 }
 
 /**

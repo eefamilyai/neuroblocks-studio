@@ -1,4 +1,18 @@
 /**
+ * Where windows may start when every line is one example: right after each
+ * token that contains a line break (and at 0), as long as a whole window fits.
+ */
+export function lineStarts(ids: Int32Array, vocab: string[], T: number): Int32Array {
+  const nl = new Uint8Array(vocab.length);
+  vocab.forEach((v, i) => (nl[i] = v.includes('\n') ? 1 : 0));
+  const out: number[] = [];
+  const last = ids.length - T - 1;
+  if (last >= 0) out.push(0);
+  for (let i = 0; i < ids.length - 1 && i + 1 <= last; i++) if (nl[ids[i]]) out.push(i + 1);
+  return Int32Array.from(out);
+}
+
+/**
  * Training a mini language model: next-token prediction.
  *
  * Every step takes `batch` random windows of `ctx` tokens from the training
@@ -54,6 +68,9 @@ export class LLMTrainer {
   private v: Float32Array[];
   private x: Int32Array;
   private y: Int32Array;
+  /** where training / validation windows may start (aligned to line starts), or null = anywhere */
+  private trainStarts: Int32Array | null;
+  private valStarts: Int32Array | null;
   step = 0;
   tokensSeen = 0;
   lastLoss = NaN;
@@ -62,7 +79,7 @@ export class LLMTrainer {
   private beta1 = 0.9;
   private beta2 = 0.95;
 
-  constructor(model: GPT, train: Int32Array, val: Int32Array, cfg: LLMTrainConfig) {
+  constructor(model: GPT, train: Int32Array, val: Int32Array, cfg: LLMTrainConfig, starts: { train: Int32Array; val: Int32Array } | null = null) {
     this.model = model;
     this.train = train;
     this.val = val;
@@ -74,6 +91,18 @@ export class LLMTrainer {
     this.v = model.params.map((p) => new Float32Array(p.w.length));
     this.x = new Int32Array(cfg.batch * T);
     this.y = new Int32Array(cfg.batch * T);
+    this.trainStarts = starts && starts.train.length ? starts.train : null;
+    this.valStarts = starts && starts.val.length ? starts.val : null;
+  }
+
+  /** Change the settings while training (the seed only matters at the start). */
+  setConfig(c: LLMTrainConfig): void {
+    const T = this.model.cfg.ctx;
+    Object.assign(this.cfg, { ...c, seed: this.cfg.seed });
+    if (this.x.length !== c.batch * T) {
+      this.x = new Int32Array(c.batch * T);
+      this.y = new Int32Array(c.batch * T);
+    }
   }
 
   /** Learning rate at a step: warm-up, then cosine decay to minLr·lr (or constant). */
@@ -87,8 +116,9 @@ export class LLMTrainer {
 
   private fillBatch(data: Int32Array, B: number, offsets: number[] | null): void {
     const T = this.model.cfg.ctx;
+    const starts = data === this.train ? this.trainStarts : null;
     for (let b = 0; b < B; b++) {
-      const i = offsets ? offsets[b] : this.rng.int(data.length - T - 1);
+      const i = offsets ? offsets[b] : starts ? starts[this.rng.int(starts.length)] : this.rng.int(data.length - T - 1);
       for (let t = 0; t < T; t++) {
         this.x[b * T + t] = data[i + t];
         this.y[b * T + t] = data[i + t + 1];
@@ -96,16 +126,30 @@ export class LLMTrainer {
     }
   }
 
+  /** A random batch of training windows (inputs x and targets y, B·T each). */
+  sampleBatch(): { x: Int32Array; y: Int32Array; B: number; T: number } {
+    const B = this.cfg.batch;
+    this.fillBatch(this.train, B, null);
+    return { x: this.x, y: this.y, B, T: this.model.cfg.ctx };
+  }
+
   /** One optimiser step on one random batch. */
   trainStep(): { loss: number; gradNorm: number; lr: number } {
     const model = this.model;
-    const T = model.cfg.ctx;
-    const B = this.cfg.batch;
-    this.fillBatch(this.train, B, null);
-    model.forward(this.x, B, T);
-    const loss = model.lossAndGrad(this.y);
+    const { x, y, B, T } = this.sampleBatch();
+    model.forward(x, B, T);
+    const loss = model.lossAndGrad(y);
     model.zeroGrad();
     model.backward();
+    return this.applyUpdate(loss, B * T);
+  }
+
+  /**
+   * Update the weights with the gradient in the model's .g arrays (already
+   * averaged over the batch): gradient clipping, then AdamW.
+   */
+  applyUpdate(loss: number, tokens: number): { loss: number; gradNorm: number; lr: number } {
+    const model = this.model;
     // gradient clipping by global norm
     let sq = 0;
     for (const p of model.params) for (let i = 0; i < p.g.length; i++) sq += p.g[i] * p.g[i];
@@ -133,7 +177,7 @@ export class LLMTrainer {
       }
     });
     this.step++;
-    this.tokensSeen += B * T;
+    this.tokensSeen += tokens;
     this.lastLoss = loss;
     this.lastGradNorm = norm;
     this.lr = lr;
@@ -146,9 +190,11 @@ export class LLMTrainer {
     const B = this.cfg.batch;
     if (this.val.length < T + 2) return NaN;
     const span = this.val.length - T - 1;
+    const vs = this.valStarts;
     let total = 0;
     for (let k = 0; k < batches; k++) {
-      const offs = Array.from({ length: B }, (_, b) => Math.floor(((k * B + b + 0.5) / (batches * B)) * span));
+      const frac = (b: number) => (k * B + b + 0.5) / (batches * B);
+      const offs = Array.from({ length: B }, (_, b) => (vs ? vs[Math.floor(frac(b) * vs.length)] : Math.floor(frac(b) * span)));
       this.fillBatch(this.val, B, offs);
       this.model.forward(this.x, B, T);
       total += this.model.loss(this.y);

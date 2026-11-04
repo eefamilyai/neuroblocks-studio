@@ -38,7 +38,7 @@ import { pytorchScript, slug } from '../export/pytorch.ts';
 import { loadLocal, markMissionDone, missionsDone, saveLocal, validateBrain, validateProject, welcomeSeen } from '../project/storage.ts';
 import type { ProjectFile } from '../project/storage.ts';
 import { Shell } from './Shell.ts';
-import type { EditorMode, LogLevel, Tab } from './Shell.ts';
+import type { AppMode, EditorMode, LogLevel, Tab } from './Shell.ts';
 import { BlocksEditor } from './BlocksEditor.ts';
 import { WorldView } from './WorldView.ts';
 import { ExperimentsPanel } from './Experiments.ts';
@@ -46,6 +46,7 @@ import { confirmCode, confirmDialog, explainExports, openLearn, openMissions, op
 import type { Settings } from './dialogs.ts';
 
 type CodeModule = typeof import('../code/runtime.ts');
+type LLMStudioT = import('../llm/ui/LLMStudio.ts').LLMStudio;
 type EditorModule = typeof import('./codeEditor.ts');
 
 interface Checkpoint extends CheckpointInfo {
@@ -108,6 +109,9 @@ export class App {
   private experiments: ExperimentsPanel;
   private lastPanels = 0;
   private codeDirty = true;
+  /** the language-model studio (loaded on demand) */
+  private llm: LLMStudioT | null = null;
+  private llmLoading: Promise<LLMStudioT> | null = null;
 
   constructor(root: HTMLElement) {
     this.settings = { ...DEFAULT_SETTINGS, ...prefs.get<Partial<Settings>>('settings', {}) };
@@ -120,8 +124,8 @@ export class App {
       projectMenu: (a) => this.projectMenu(a),
       missions: () => this.openMissions(),
       lab: () => this.openLab(),
-      learn: () => openLearn(() => this.openMissions(), () => this.openLab()),
-      exportMenu: (a) => this.exportMenu(a),
+      learn: () => openLearn(() => this.openMissions(), () => this.openLab(), this.shell.appMode),
+      exportMenu: (a) => (this.shell.appMode === 'language' ? this.llm?.exportMenu(a) : this.exportMenu(a)),
       moreMenu: (a) => this.moreMenu(a),
       setEditorMode: (m) => void this.setEditorMode(m),
       setTab: (t) => this.setTab(t),
@@ -133,6 +137,7 @@ export class App {
         this.blocks?.resize();
         this.worldView?.view.resize();
       },
+      setAppMode: (m) => void this.setAppMode(m),
     });
     this.trainingPanel = new TrainingPanel({
       onWatchCheckpoint: (i) => this.watchCheckpoint(i),
@@ -213,6 +218,7 @@ export class App {
       }
     }
     if (!restored) this.loadMission(MISSIONS[0], true);
+    if (prefs.get<AppMode>('appMode', 'robots') === 'language') void this.setAppMode('language');
     if (!welcomeSeen()) setTimeout(() => this.welcome(), 400);
     this.log(`Welcome to NeuroBlocks Studio! Training runs in ${this.client.mode === 'worker' ? 'a background worker thread' : 'the main thread (no Web Worker support)'}.`, 'learn');
     window.addEventListener('beforeunload', () => this.autosave());
@@ -225,6 +231,7 @@ export class App {
         idle(() => {
           void this.loadCodeModules().catch(() => {});
           void import('../ui/lab.ts').catch(() => {});
+          void import('../llm/ui/LLMStudio.ts').catch(() => {});
         }),
       6000,
     );
@@ -241,6 +248,38 @@ export class App {
     this.showcase.computeTrace();
     if (t === 'code' && this.codeDirty) this.refreshCodePanel();
     if (t === 'math') this.mathPanel.render(true, true);
+  }
+
+  /** Switch between the robot studio and the language-model studio (loaded on first use). */
+  private async setAppMode(m: AppMode): Promise<void> {
+    prefs.set('appMode', m);
+    if (m === 'robots') {
+      this.shell.setAppMode('robots');
+      this.llm?.hide();
+      setTimeout(() => {
+        this.worldView.view.resize();
+        this.blocks.resize();
+      }, 0);
+      return;
+    }
+    this.shell.setAppMode('language');
+    if (!this.llm) {
+      if (!this.llmLoading) {
+        this.shell.llmHost.replaceChildren(h('div', { class: 'loading', style: { position: 'relative', flex: '1' } }, 'Loading the language studio…'));
+        this.llmLoading = import('../llm/ui/LLMStudio.ts').then(({ LLMStudio }) => new LLMStudio(this.shell));
+      }
+      try {
+        this.llm = await this.llmLoading;
+      } catch (e) {
+        this.llmLoading = null;
+        this.log(`Could not load the language studio: ${(e as Error).message}`, 'err');
+        toast('Could not load the language studio (offline?)', 3500, 'error');
+        this.shell.setAppMode('robots');
+        prefs.set('appMode', 'robots');
+        return;
+      }
+    }
+    if (this.shell.appMode === 'language') this.llm.show();
   }
 
   private toggleFocus(): void {
@@ -962,17 +1001,20 @@ export class App {
     };
     window.addEventListener('keydown', (e) => {
       if (e.defaultPrevented) return;
+      const language = this.shell.appMode === 'language';
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
-        void this.toggleTrain();
+        if (language) void this.llm?.toggleTrain();
+        else void this.toggleTrain();
         return;
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
-        this.saveProjectFile();
+        if (language) this.llm?.saveFile();
+        else this.saveProjectFile();
         return;
       }
-      if (isTyping(e)) return;
+      if (isTyping(e) || language) return;
       if (this.worldView.building && this.worldView.handleKey(e)) {
         e.preventDefault();
         return;
@@ -1043,7 +1085,7 @@ export class App {
     menu(anchor, [
       { label: 'Missions', icon: 'target', action: () => this.openMissions() },
       { label: 'Neuron Lab', icon: 'flask', action: () => void this.openLab() },
-      { label: 'Learn', icon: 'learn', action: () => openLearn(() => this.openMissions(), () => void this.openLab()) },
+      { label: 'Learn', icon: 'learn', action: () => openLearn(() => this.openMissions(), () => void this.openLab(), this.shell.appMode) },
       'sep',
       { label: 'Settings', icon: 'settings', action: () => this.openSettings() },
       { label: 'Keyboard shortcuts', icon: 'keyboard', action: () => openShortcuts() },
@@ -1158,6 +1200,7 @@ export class App {
       },
       missions: () => this.openMissions(),
       code: () => void this.newProject('code'),
+      language: () => void this.setAppMode('language'),
     });
   }
 
