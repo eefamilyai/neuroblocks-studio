@@ -140,8 +140,17 @@ export class App {
     this.showcase.onLog = (m) => this.log(`📝 ${m}`, 'info');
     this.initKeyboard();
     const saved = loadLocal();
-    if (saved) this.loadProject(saved, true);
-    else this.loadMission(MISSIONS[0], true);
+    let restored = false;
+    if (saved) {
+      try {
+        this.loadProject(saved, true);
+        restored = true;
+      } catch (e) {
+        console.warn('Could not restore the autosave', e);
+        this.log(`⚠️ Your last session could not be restored (${(e as Error).message}). Starting fresh.`, 'warn');
+      }
+    }
+    if (!restored) this.loadMission(MISSIONS[0], true);
     if (!welcomeSeen()) setTimeout(() => this.openWelcome(), 400);
     this.log(`Welcome to NeuroBlocks Studio! Training runs in ${this.client.mode === 'worker' ? 'a background worker thread' : 'the main thread (no Web Worker support)'}.`, 'learn');
     window.addEventListener('beforeunload', () => this.autosave());
@@ -1389,7 +1398,13 @@ export class App {
     try {
       const p = JSON.parse(await f.text());
       if (!validateProject(p)) throw new Error('not a NeuroBlocks project file');
-      this.loadProject(p, false);
+      const backup = this.projectData();
+      try {
+        this.loadProject(p, false);
+      } catch (err) {
+        this.loadProject(backup, true);
+        throw err;
+      }
       toast(`📂 Opened "${p.name}"`);
     } catch (e) {
       toast(`⛔ Could not open: ${(e as Error).message}`, 4000);
