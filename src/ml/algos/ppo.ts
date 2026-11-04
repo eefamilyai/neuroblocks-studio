@@ -14,6 +14,20 @@
  *        L = −min(ρ·A, clip(ρ, 1−ε, 1+ε)·A)  −  β·entropy  +  c·(V − R)²
  *     where ρ = π_new(a|s) / π_old(a|s). The clip stops any single update
  *     from changing the policy too much ("proximal").
+ *
+ * IN PLAIN WORDS
+ * --------------
+ * The robot tries things (with some randomness), and afterwards each action
+ * is judged: did things go BETTER than the critic expected after it (positive
+ * advantage) or WORSE (negative)? The actor's weights are then nudged so that
+ * better-than-expected actions become more likely in those situations and
+ * worse-than-expected ones less likely. The critic is nudged to predict the
+ * rewards better next time. This is where your rewards turn into weight
+ * changes: a reward that pays for stalling makes stalling "better than
+ * expected", so stalling becomes more likely.
+ *
+ * The work is cut into small pieces (work() is called again and again by the
+ * trainer) so training can report progress and be paused at any moment.
  */
 import type { AgentSpec } from '../../sim/types.ts';
 import { MLP } from '../nn.ts';
@@ -47,19 +61,20 @@ export class PPO implements Algorithm {
   private optC: Optimizer;
   private space: ActionSpace;
 
-  private T: number;
-  private N: number;
-  private S: number;
-  private D: number;
-  private O: number;
-  private bObs: Float32Array;
-  private bAct: Float32Array;
-  private bLogp: Float32Array;
-  private bVal: Float32Array;
-  private bRew: Float32Array;
-  private bDone: Uint8Array;
-  private bAdv: Float32Array;
-  private bRet: Float32Array;
+  private T: number; // steps collected per world before each update (the "horizon")
+  private N: number; // number of parallel worlds
+  private S: number; // size of an observation (how many sense numbers)
+  private D: number; // action dimensions (how many controls, e.g. move and turn)
+  private O: number; // actor outputs (scores for every choice, or means for continuous actions)
+  // ---- the experience buffer: one entry per (step, world), T·N entries, entry k = t·N + world
+  private bObs: Float32Array; //  what the robot sensed (normalised)
+  private bAct: Float32Array; //  what it did
+  private bLogp: Float32Array; // log-probability of that action under the policy AT THE TIME
+  private bVal: Float32Array; //  the critic's estimate V(s) at the time
+  private bRew: Float32Array; //  the reward it got (possibly scaled)
+  private bDone: Uint8Array; //   1 if the episode ended at this step
+  private bAdv: Float32Array; //  advantage: how much better than expected (filled after collecting)
+  private bRet: Float32Array; //  return: the target for the critic (advantage + value)
   private nobs: Float32Array;
   private actBuf: Float32Array;
   private t = 0;
@@ -88,11 +103,17 @@ export class PPO implements Algorithm {
     this.N = vec.n;
     this.T = Math.max(8, Math.round(tr.horizon));
     const hidden = makeHiddenLayers(spec);
+    // actor: senses → action scores. Its last layer starts tiny (×0.01) so every choice starts
+    // almost equally likely: the robot begins by exploring evenly.
     this.actor = new MLP(this.S, hidden, this.O, 'linear', this.rng, 0.01);
+    // critic: senses → one number, the expected future reward from here
     this.critic = new MLP(this.S, hidden, 1, 'linear', this.rng, 1);
+    // continuous actions are drawn from a bell curve around the actor's output; log(spread)
+    // is learned too (−0.5 → spread ≈ 0.6 at the start)
     this.logStd = space.kind === 'continuous' ? new Float32Array(this.D).fill(-0.5) : null;
     this.dLogStd = this.logStd ? new Float32Array(this.D) : null;
     this.obsRms = new RunningMeanStd(this.S, 5);
+    // continue from an earlier brain (same shapes) instead of random weights
     if (init && init.kind === 'policy' && init.net.inSize === this.S && init.net.layers[init.net.layers.length - 1].outSize === this.O) {
       if (this.actor.sameShape(init.net)) this.actor = MLP.fromJSON(init.net);
       if (init.critic && this.critic.sameShape(init.critic)) this.critic = MLP.fromJSON(init.critic);
@@ -131,6 +152,11 @@ export class PPO implements Algorithm {
     this.optC.lr = lr;
   }
 
+  /**
+   * Observation normalisation: shift and scale every sense to roughly mean 0,
+   * spread 1 (using running averages), because networks learn badly when one
+   * input is ~1000 and another ~0.01.
+   */
   private normalizeInto(src: Float32Array, dst: Float32Array, n: number, update: boolean): void {
     if (this.spec.train.normObs) {
       if (update) this.obsRms.update(src, n);
@@ -138,6 +164,7 @@ export class PPO implements Algorithm {
     } else dst.set(src.subarray(0, n * this.S));
   }
 
+  /** One small piece of work: either one step in every world, or one minibatch of learning. */
   work(): void {
     if (this.t < this.T) {
       this.collectStep();
@@ -148,20 +175,24 @@ export class PPO implements Algorithm {
     this.learnMinibatch();
   }
 
+  /** 1. COLLECT: every world takes one step with the current policy; remember everything. */
   private collectStep(): void {
     const { N, S, D, O } = this;
     const tr = this.spec.train;
-    const base = this.t * N;
+    const base = this.t * N; // where this step's entries start in the buffers
     this.normalizeInto(this.vec.obs, this.nobs, N, true);
     this.bObs.set(this.nobs, base * S);
-    const out = this.actor.forward(this.nobs, N);
-    const vals = this.critic.forward(this.nobs, N);
+    // the senses of all N worlds go through both networks at once (a batch of N)
+    const out = this.actor.forward(this.nobs, N); //    action scores
+    const vals = this.critic.forward(this.nobs, N); //  "how good is this situation?"
     for (let i = 0; i < N; i++) {
       this.bVal[base + i] = vals[i];
+      // pick an action at random according to the policy's probabilities (that randomness is
+      // the exploration) and remember how likely that action was
       this.bLogp[base + i] = this.head.sample(out, i * O, this.logStd, this.rng, this.actBuf, i * D, false);
     }
     this.bAct.set(this.actBuf, base * D);
-    this.vec.step(this.actBuf);
+    this.vec.step(this.actBuf); // physics + your reward events run here, in every world
     // reward scaling: divide by the std of the running discounted return
     let truncNeeded = false;
     for (let i = 0; i < N; i++) {
@@ -190,12 +221,25 @@ export class PPO implements Algorithm {
     this.t++;
   }
 
+  /**
+   * 2. ADVANTAGES (Generalised Advantage Estimation), walking BACKWARDS in time.
+   *
+   * For each step: δ = reward + γ·V(next situation) − V(this situation)
+   * "what I got now plus what the critic thinks the next situation is worth,
+   *  compared with what it thought this situation was worth".
+   * Example: the critic expected 5; the robot got 1 and landed somewhere worth
+   * 6 (γ = 0.99): δ = 1 + 0.99·6 − 5 = 1.94 → better than expected.
+   * The advantage adds up these surprises over the following steps, fading by
+   * γ·λ per step: A_t = δ_t + γλ·A_{t+1}. At the end of an episode
+   * (nonTerm = 0) nothing from the next episode leaks in.
+   */
   private computeAdvantages(): void {
     const { N, T } = this;
     const tr = this.spec.train;
     this.normalizeInto(this.vec.obs, this.nobs, N, false);
+    // the value of where each world stands now, after the last collected step
     const lastV = Float32Array.from(this.critic.forward(this.nobs, N).subarray(0, N));
-    const gae = new Float64Array(N);
+    const gae = new Float64Array(N); // running advantage per world
     for (let t = T - 1; t >= 0; t--) {
       for (let i = 0; i < N; i++) {
         const k = t * N + i;
@@ -204,7 +248,7 @@ export class PPO implements Algorithm {
         const delta = this.bRew[k] + tr.gamma * nextV * nonTerm - this.bVal[k];
         gae[i] = delta + tr.gamma * tr.lambda * nonTerm * gae[i];
         this.bAdv[k] = gae[i];
-        this.bRet[k] = gae[i] + this.bVal[k];
+        this.bRet[k] = gae[i] + this.bVal[k]; // what the critic SHOULD have said: its target
       }
     }
     // explained variance of the critic (1 = perfect, 0 = useless)
@@ -225,7 +269,8 @@ export class PPO implements Algorithm {
     // remember one sample for the explainer
     const k = Math.floor(this.rng.next() * B);
     this.sampleRow = { reward: this.bRew[k], value: this.bVal[k], advantage: this.bAdv[k], ret: this.bRet[k] };
-    // normalise advantages
+    // normalise advantages to mean 0, spread 1: about half the actions get pushed up and half
+    // down, and the step size does not depend on how big your rewards happen to be
     let ma = 0;
     for (let k2 = 0; k2 < B; k2++) ma += this.bAdv[k2];
     ma /= B;
@@ -241,6 +286,10 @@ export class PPO implements Algorithm {
     shuffleIndices(B, this.rng, this.perm);
   }
 
+  /**
+   * 3. LEARN on one minibatch: a random slice of the collected experience.
+   * The whole buffer is used `epochs` times (e.g. 4), in random minibatches.
+   */
   private learnMinibatch(): void {
     const tr = this.spec.train;
     const { S, D, O } = this;
@@ -265,32 +314,39 @@ export class PPO implements Algorithm {
     const eps = tr.clip;
     for (let j = 0; j < M; j++) {
       const k = idx[j];
+      // ratio = (probability of that action NOW) / (probability when it was taken)
+      // ratio > 1: the policy already made this action more likely during this update
       const lp = this.head.logProb(out, j * O, this.logStd, this.mbAct, j * D);
       const logRatio = lp - this.bLogp[k];
       const ratio = Math.exp(Math.max(-20, Math.min(20, logRatio)));
       const A = this.bAdv[k];
+      // the clipped objective: gain ratio·A, but the ratio may only count between 1−ε and 1+ε,
+      // so no single update can change the policy too much
       const s1 = ratio * A;
       const s2 = Math.max(1 - eps, Math.min(1 + eps, ratio)) * A;
-      pl += -Math.min(s1, s2);
+      pl += -Math.min(s1, s2); // the loss is the NEGATIVE gain (gradient descent makes losses smaller)
       const clipped = (A >= 0 && ratio > 1 + eps) || (A < 0 && ratio < 1 - eps);
       if (clipped) clipN++;
-      kl += ratio - 1 - logRatio;
-      const h = this.head.entropy(out, j * O, this.logStd);
+      kl += ratio - 1 - logRatio; // estimate of how far the policy has moved (KL divergence)
+      const h = this.head.entropy(out, j * O, this.logStd); // how random the policy is here
       ent += h;
+      // gradient of the loss w.r.t. log π(a|s): −ratio·A. Positive advantage → make the action
+      // more likely; negative → less likely. Zero once clipped: it has moved far enough.
       const gLogp = clipped ? 0 : -ratio * A;
+      // turn that into gradients for the actor's outputs (plus an entropy bonus: keep exploring)
       this.head.accumGrad(out, j * O, this.logStd, this.mbAct, j * D, gLogp / M, -tr.entropy / M, this.dOut, j * O, this.dLogStd);
     }
-    this.actor.backward(this.dOut, M);
+    this.actor.backward(this.dOut, M); // backpropagation through the actor (nn.ts)
     const gnA = clipGradNorm(this.optA.params, tr.maxGradNorm);
-    this.optA.step();
-    // ---- critic ----
+    this.optA.step(); // the weights change here (optim.ts)
+    // ---- critic ---- plain regression: make V(s) closer to the return that really happened
     this.optC.zeroGrad();
     const v = this.critic.forward(this.mbObs, M);
     let vl = 0;
     for (let j = 0; j < M; j++) {
-      const e = v[j] - this.bRet[idx[j]];
-      vl += 0.5 * e * e;
-      this.dV[j] = (tr.valueCoef * e) / M;
+      const e = v[j] - this.bRet[idx[j]]; // prediction error
+      vl += 0.5 * e * e; // squared error loss
+      this.dV[j] = (tr.valueCoef * e) / M; // its gradient: the error itself (averaged)
     }
     this.critic.backward(this.dV, M);
     const gnC = clipGradNorm(this.optC.params, tr.maxGradNorm);
@@ -317,6 +373,7 @@ export class PPO implements Algorithm {
     if (this.epoch >= tr.epochs || this.earlyStop) this.finishUpdate();
   }
 
+  /** End of one update: record the numbers you see in the Training and Math tabs, then collect again. */
   private finishUpdate(): void {
     const a = this.acc;
     const k = Math.max(1, a.k);
