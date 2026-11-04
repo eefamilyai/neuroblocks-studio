@@ -12,9 +12,9 @@ import { makeOptimizer } from '../ml/optim.ts';
 import type { Optimizer, OptimizerKind } from '../ml/optim.ts';
 import { RNG } from '../ml/rng.ts';
 import { LineChart } from './charts.ts';
-import { fmt, h, modal } from './dom.ts';
+import { btn, clear, fmt, h, modal, seg, setText } from './dom.ts';
 
-type DatasetKind = 'circle' | 'xor' | 'spiral' | 'blobs' | 'moons';
+type DatasetKind = 'circle' | 'xor' | 'spiral' | 'blobs' | 'moons' | 'draw';
 type Feature = 'x' | 'y' | 'x²' | 'y²' | 'x·y' | 'sin x' | 'sin y';
 
 const FEATURES: Feature[] = ['x', 'y', 'x²', 'y²', 'x·y', 'sin x', 'sin y'];
@@ -40,6 +40,7 @@ function feature(f: Feature, x: number, y: number): number {
 
 function makeData(kind: DatasetKind, n: number, noise: number, rng: RNG): { x: number; y: number; c: number }[] {
   const pts: { x: number; y: number; c: number }[] = [];
+  if (kind === 'draw') return pts;
   const nz = () => rng.gauss() * noise;
   for (let i = 0; i < n; i++) {
     const c = i % 2;
@@ -96,6 +97,13 @@ export function openNeuronLab(): void {
     lr: 0.03,
     optimizer: 'adam' as OptimizerKind,
     batch: 16,
+    /** L2 regularisation (weight decay) */
+    l2: 0,
+    testFrac: 0.3,
+    points: 400,
+    /** colour for clicks on the plot */
+    paint: 0,
+    speed: 3,
     running: false,
     epoch: 0,
   };
@@ -107,10 +115,10 @@ export function openNeuronLab(): void {
   const lossTrain: number[] = [];
   const lossTest: number[] = [];
 
-  const canvas = h('canvas', { width: '440', height: '440', style: { width: '100%', maxWidth: '440px', aspectRatio: '1', borderRadius: '12px', border: '1px solid var(--line2)', background: '#0f1324', display: 'block' } }) as HTMLCanvasElement;
+  const canvas = h('canvas', { width: '480', height: '480', style: { width: '100%', maxWidth: '480px', aspectRatio: '1', borderRadius: '12px', border: '1px solid var(--line-2)', background: '#0f1324', display: 'block' } }) as HTMLCanvasElement;
   const chart = new LineChart('Loss (lower is better)', 'Binary cross-entropy on the training points (the network learns from these) and on the TEST points (never used for learning). When test loss goes up while train loss goes down, the network is memorising: overfitting.');
   const stats = h('div', { class: 'kv' });
-  const archEl = h('div', { class: 'small muted' });
+  const archEl = h('div', { class: 'note', style: { margin: '2px 0 0' } });
   const layerHost = h('div');
 
   const featureInputs = (): Feature[] => FEATURES.filter((f) => state.features.has(f));
@@ -128,10 +136,11 @@ export function openNeuronLab(): void {
   }
 
   function regen(): void {
-    const all = makeData(state.dataset, 400, state.noise, rng);
+    const all = makeData(state.dataset, state.points, state.noise, rng);
     rng.shuffle(all);
-    train = all.slice(0, 280);
-    test = all.slice(280);
+    const nTest = Math.round(all.length * state.testFrac);
+    test = all.slice(0, nTest);
+    train = all.slice(nTest);
     rebuild();
   }
 
@@ -146,6 +155,7 @@ export function openNeuronLab(): void {
   const sig = (z: number) => 1 / (1 + Math.exp(-z));
 
   function evalLoss(pts: { x: number; y: number; c: number }[]): { loss: number; acc: number } {
+    if (!pts.length) return { loss: NaN, acc: NaN };
     const out = net.forward(inputsOf(pts), pts.length);
     let loss = 0;
     let ok = 0;
@@ -159,9 +169,11 @@ export function openNeuronLab(): void {
 
   /** one epoch of minibatch gradient descent */
   function epoch(): void {
+    if (!train.length) return;
     const idx = train.map((_, i) => i);
     rng.shuffle(idx);
-    const B = Math.max(1, state.batch);
+    const B = state.batch > 0 ? state.batch : idx.length;
+    const params = net.params();
     for (let s = 0; s < idx.length; s += B) {
       const batch = idx.slice(s, s + B).map((i) => train[i]);
       const X = inputsOf(batch);
@@ -171,6 +183,8 @@ export function openNeuronLab(): void {
       // sigmoid + cross-entropy: dL/dz = p − y  (the nicest gradient in ML)
       batch.forEach((p, i) => (d[i] = (sig(out[i]) - p.c) / batch.length));
       net.backward(d, batch.length);
+      // L2 regularisation: loss + λ/2·Σw²  →  gradient + λ·w (weights only, not biases)
+      if (state.l2 > 0) for (const p of params) if (p.name.endsWith('weight')) for (let i = 0; i < p.w.length; i++) p.g[i] += state.l2 * p.w[i];
       opt.step();
     }
     state.epoch++;
@@ -251,27 +265,29 @@ export function openNeuronLab(): void {
       lossTest.shift();
     }
     chart.smoothing = 0;
+    chart.xLabel = (v) => String(Math.round(v));
     chart.setSeries([
       { name: 'train', color: '#2fd182', xs: lossX, ys: lossTrain, raw: true },
       { name: 'test', color: '#ff6fae', xs: lossX, ys: lossTest, raw: true },
     ]);
     chart.draw();
-    stats.innerHTML = '';
+    clear(stats);
     const row = (k: string, v: string) => stats.append(h('span', null, k), h('b', null, v));
+    const pct = (v: number) => (Number.isFinite(v) ? `${(v * 100).toFixed(0)}%` : '–');
     row('Epoch', String(state.epoch));
-    row('Train loss / accuracy', `${fmt(tr.loss, 3)} / ${(tr.acc * 100).toFixed(0)}%`);
-    row('Test loss / accuracy', `${fmt(te.loss, 3)} / ${(te.acc * 100).toFixed(0)}%`);
+    row(`Train (${train.length} points) loss / accuracy`, `${fmt(tr.loss, 3)} / ${pct(tr.acc)}`);
+    row(`Test (${test.length} points) loss / accuracy`, `${fmt(te.loss, 3)} / ${pct(te.acc)}`);
   }
 
   function renderLayers(): void {
-    layerHost.innerHTML = '';
+    clear(layerHost);
     state.layers.forEach((l, i) => {
-      const units = h('input', { type: 'number', min: '1', max: '64', value: String(l.units), class: 'sel', style: { width: '60px' } }) as HTMLInputElement;
+      const units = h('input', { type: 'number', min: '1', max: '64', value: String(l.units), class: 'input sm', style: { width: '64px' } }) as HTMLInputElement;
       units.addEventListener('change', () => {
         l.units = Math.max(1, Math.min(64, Number(units.value) || 1));
         rebuild();
       });
-      const act = h('select', { class: 'sel' }) as HTMLSelectElement;
+      const act = h('select', { class: 'sel sm' }) as HTMLSelectElement;
       for (const a of ACTIVATIONS) act.append(h('option', { value: a, selected: a === l.activation }, a));
       act.addEventListener('change', () => {
         l.activation = act.value as Activation;
@@ -281,79 +297,74 @@ export function openNeuronLab(): void {
         h(
           'div',
           { class: 'row', style: { marginBottom: '4px' } },
-          h('span', { class: 'small muted', style: { width: '58px' } }, `layer ${i + 1}`),
+          h('span', { class: 'small muted', style: { width: '52px' } }, `layer ${i + 1}`),
           units,
           act,
-          h(
-            'button',
-            {
-              class: 'btn tiny',
-              onclick: () => {
-                state.layers.splice(i, 1);
-                renderLayers();
-                rebuild();
-              },
+          btn({
+            icon: 'x',
+            cls: 'xs ghost',
+            title: 'Remove this layer',
+            onclick: () => {
+              state.layers.splice(i, 1);
+              renderLayers();
+              rebuild();
             },
-            '✕',
-          ),
+          }),
         ),
       );
     });
-    layerHost.append(
-      h(
-        'button',
-        {
-          class: 'btn tiny',
+    if (state.layers.length < 5)
+      layerHost.append(
+        btn({
+          icon: 'plus',
+          label: 'Add layer',
+          cls: 'xs',
           onclick: () => {
-            if (state.layers.length < 5) state.layers.push({ units: 4, activation: 'tanh' });
+            state.layers.push({ units: 4, activation: 'tanh' });
             renderLayers();
             rebuild();
           },
-        },
-        '＋ add layer',
-      ),
-    );
+        }),
+      );
   }
 
-  const dsSel = h('select', { class: 'sel' }) as HTMLSelectElement;
-  for (const [v, l] of [
-    ['circle', '⭕ circle'],
-    ['xor', '✖️ XOR'],
-    ['spiral', '🌀 spiral'],
-    ['blobs', '🫧 two blobs'],
-    ['moons', '🌙 moons'],
-  ])
-    dsSel.append(h('option', { value: v }, l));
-  dsSel.addEventListener('change', () => {
-    state.dataset = dsSel.value as DatasetKind;
-    regen();
-  });
-  const noise = h('input', { type: 'range', min: '0', max: '0.6', step: '0.02', value: String(state.noise) }) as HTMLInputElement;
+  const select = <T extends string | number>(opts: [T, string][], value: T, on: (v: T) => void, title = ''): HTMLSelectElement => {
+    const el = h('select', { class: 'sel sm', title }) as HTMLSelectElement;
+    for (const [v, l] of opts) el.append(h('option', { value: String(v), selected: v === value }, l));
+    el.addEventListener('change', () => on((typeof value === 'number' ? Number(el.value) : el.value) as T));
+    return el;
+  };
+  const dsSel = select<DatasetKind>(
+    [
+      ['circle', 'circle'],
+      ['xor', 'XOR'],
+      ['spiral', 'spiral'],
+      ['blobs', 'two blobs'],
+      ['moons', 'moons'],
+      ['draw', 'draw your own'],
+    ],
+    state.dataset,
+    (v) => {
+      state.dataset = v;
+      regen();
+      setText(drawHint, v === 'draw' ? 'Click the plot to add points (pick the colour below). Add some of each colour, then press Train.' : 'Click the plot to add your own points to any dataset (e.g. outliers).');
+    },
+  );
+  const noise = h('input', { type: 'range', min: '0', max: '0.6', step: '0.02', value: String(state.noise), style: { width: '90px' } }) as HTMLInputElement;
   noise.addEventListener('change', () => {
     state.noise = Number(noise.value);
     regen();
   });
-  const lrSel = h('select', { class: 'sel' }) as HTMLSelectElement;
-  for (const v of [0.0003, 0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1]) lrSel.append(h('option', { value: String(v), selected: v === state.lr }, String(v)));
-  lrSel.addEventListener('change', () => {
-    state.lr = Number(lrSel.value);
-    opt.lr = state.lr;
-  });
-  const optSel = h('select', { class: 'sel' }) as HTMLSelectElement;
-  for (const [v, l] of [
-    ['adam', 'Adam'],
-    ['sgd', 'SGD'],
-    ['momentum', 'Momentum'],
-    ['rmsprop', 'RMSProp'],
-  ])
-    optSel.append(h('option', { value: v }, l));
-  optSel.addEventListener('change', () => {
-    state.optimizer = optSel.value as OptimizerKind;
-    opt = makeOptimizer(state.optimizer, net.params(), state.lr);
-  });
-  const featHost = h('div', { class: 'row' });
+  const sizeSel = select<number>([[100, '100 points'], [400, '400 points'], [1000, '1000 points']], state.points, (v) => ((state.points = v), regen()));
+  const splitSel = select<number>([[0.1, '10% test'], [0.3, '30% test'], [0.5, '50% test']], state.testFrac, (v) => ((state.testFrac = v), regen()), 'Points held back to check generalisation');
+  const lrSel = select<number>([[0.0003, '0.0003'], [0.001, '0.001'], [0.003, '0.003'], [0.01, '0.01'], [0.03, '0.03'], [0.1, '0.1'], [0.3, '0.3'], [1, '1']], state.lr, (v) => ((state.lr = v), (opt.lr = v)));
+  const optSel = select<OptimizerKind>([['adam', 'Adam'], ['sgd', 'SGD'], ['momentum', 'Momentum'], ['rmsprop', 'RMSProp']], state.optimizer, (v) => ((state.optimizer = v), (opt = makeOptimizer(v, net.params(), state.lr))));
+  const batchSel = select<number>([[1, 'batch 1'], [4, 'batch 4'], [16, 'batch 16'], [64, 'batch 64'], [0, 'full batch']], state.batch, (v) => (state.batch = v), 'Points per gradient step');
+  const l2Sel = select<number>([[0, 'L2 off'], [0.0001, 'L2 0.0001'], [0.001, 'L2 0.001'], [0.01, 'L2 0.01'], [0.1, 'L2 0.1']], state.l2, (v) => (state.l2 = v), 'L2 regularisation (weight decay): punishes big weights, fights overfitting');
+  const speedSel = select<number>([[1, '1 epoch / frame'], [3, '3 epochs / frame'], [10, '10 epochs / frame']], state.speed, (v) => (state.speed = v));
+  const featHost = h('div', { class: 'row', style: { flexWrap: 'wrap', gap: '4px' } });
   for (const f of FEATURES) {
-    const b = h('button', { class: 'btn tiny' + (state.features.has(f) ? ' on' : '') }, f);
+    const b = btn({ label: f, cls: 'xs' + (state.features.has(f) ? ' on' : '') });
     b.addEventListener('click', () => {
       if (state.features.has(f)) state.features.delete(f);
       else state.features.add(f);
@@ -362,50 +373,84 @@ export function openNeuronLab(): void {
     });
     featHost.append(b);
   }
-  const playBtn = h('button', { class: 'btn primary small' }, '▶ Train') as HTMLButtonElement;
+  const paint = seg<string>(
+    [
+      { value: '0', label: '● blue' },
+      { value: '1', label: '● orange' },
+    ],
+    (v) => {
+      state.paint = Number(v);
+      paint.set(v);
+    },
+    'sm',
+  );
+  paint.set('0');
+  (paint.el.children[0] as HTMLElement).style.color = '#4cc3ff';
+  (paint.el.children[1] as HTMLElement).style.color = '#ffb347';
+  const drawHint = h('div', { class: 'note', style: { margin: 0 } }, 'Click the plot to add your own points to any dataset (e.g. outliers).');
+  // click the plot: add a training point (Shift = the other colour)
+  canvas.style.cursor = 'crosshair';
+  const addPoint = (e: MouseEvent, other: boolean) => {
+    const r = canvas.getBoundingClientRect();
+    const S = 2.6;
+    const x = ((e.clientX - r.left) / r.width) * 2 * S - S;
+    const y = S - ((e.clientY - r.top) / r.height) * 2 * S;
+    const c = other ? 1 - state.paint : state.paint;
+    // every few clicks a point goes to the test set, so there is something to generalise to
+    if (rng.next() < state.testFrac) test.push({ x, y, c });
+    else train.push({ x, y, c });
+    draw();
+  };
+  canvas.addEventListener('click', (e) => addPoint(e, e.shiftKey));
+  canvas.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    addPoint(e, true);
+  });
+
+  const playBtn = btn({ icon: 'play', label: 'Train', cls: 'sm primary' });
   let raf = 0;
   const loop = () => {
     if (!state.running) return;
-    for (let k = 0; k < 3; k++) epoch();
+    for (let k = 0; k < state.speed; k++) epoch();
     draw();
     raf = requestAnimationFrame(loop);
   };
   playBtn.addEventListener('click', () => {
     state.running = !state.running;
-    playBtn.textContent = state.running ? '⏸ Pause' : '▶ Train';
-    playBtn.className = 'btn small ' + (state.running ? 'warn' : 'primary');
+    playBtn.replaceChildren(...btn({ icon: state.running ? 'pause' : 'play', label: state.running ? 'Pause' : 'Train' }).childNodes);
+    playBtn.className = 'btn sm ' + (state.running ? 'warn' : 'primary');
     if (state.running) raf = requestAnimationFrame(loop);
   });
 
+  const lbl = (t: string) => h('span', { class: 'small muted' }, t);
   const body = h(
     'div',
-    { style: { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.1fr)', gap: '16px' } },
+    { style: { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.1fr)', gap: '18px' } },
     h(
       'div',
-      null,
+      { class: 'col' },
       canvas,
-      h('div', { class: 'small muted', style: { marginTop: '6px' } }, 'Filled dots = training data, hollow = test data. Background = what the network predicts everywhere (blue vs orange). The boundary is where it is 50/50.'),
+      h('div', { class: 'row', style: { flexWrap: 'wrap' } }, lbl('add points'), paint.el, btn({ icon: 'trash', label: 'Clear points', cls: 'xs', onclick: () => ((train = []), (test = []), draw()) })),
+      drawHint,
+      h('div', { class: 'note', style: { margin: 0 } }, 'Filled dots = training data, hollow = test data. The background is what the network predicts everywhere; the boundary is where it is 50/50.'),
     ),
     h(
       'div',
-      { style: { display: 'flex', flexDirection: 'column', gap: '10px' } },
-      h(
-        'div',
-        { class: 'card explain' },
-        h('p', { style: { marginTop: 0 } }, h('b', null, 'Supervised learning: '), 'every point comes with the right answer (its colour). The network outputs a probability p, the loss −[y·log p + (1−y)·log(1−p)] says how wrong it is, and gradient descent nudges every weight to be a bit less wrong. The robots learn the same way, except reinforcement learning has to discover the "right answers" by trial and error.'),
-      ),
-      h('div', { class: 'row' }, playBtn, h('button', { class: 'btn small', onclick: () => (epoch(), draw()) }, '⏭ 1 epoch'), h('button', { class: 'btn small', onclick: () => rebuild() }, '⟲ New weights'), h('button', { class: 'btn small', onclick: () => regen() }, '🎲 New data')),
-      h('div', { class: 'row' }, h('span', { class: 'small' }, 'dataset'), dsSel, h('span', { class: 'small' }, 'noise'), noise),
-      h('div', null, h('div', { class: 'small', style: { marginBottom: '4px' } }, 'input features (try x² and y² on the circle!)'), featHost),
-      h('div', null, h('div', { class: 'small', style: { marginBottom: '4px' } }, 'hidden layers'), layerHost, archEl),
-      h('div', { class: 'row' }, h('span', { class: 'small' }, 'learning rate'), lrSel, h('span', { class: 'small' }, 'optimizer'), optSel),
+      { class: 'col', style: { gap: '12px' } },
+      h('div', { class: 'card explain', style: { fontSize: '12.5px' } }, h('b', null, 'Supervised learning: '), 'every point comes with the right answer (its colour). The network outputs a probability p, the loss −[y·log p + (1−y)·log(1−p)] says how wrong it is, and gradient descent nudges every weight to be a bit less wrong. The robots learn the same way, except reinforcement learning has to discover the "right answers" by trial and error.'),
+      h('div', { class: 'row', style: { flexWrap: 'wrap' } }, playBtn, btn({ icon: 'step', label: '1 epoch', cls: 'sm', onclick: () => (epoch(), draw()) }), btn({ icon: 'reset', label: 'New weights', cls: 'sm', onclick: () => rebuild() }), btn({ icon: 'shuffle', label: 'New data', cls: 'sm', onclick: () => regen() }), speedSel),
+      h('div', { class: 'row', style: { flexWrap: 'wrap' } }, lbl('data'), dsSel, sizeSel, splitSel, lbl('noise'), noise),
+      h('div', { class: 'col', style: { gap: '4px' } }, lbl('input features (try x² and y² on the circle!)'), featHost),
+      h('div', { class: 'col', style: { gap: '4px' } }, lbl('hidden layers'), layerHost, archEl),
+      h('div', { class: 'row', style: { flexWrap: 'wrap' } }, lbl('learning'), lrSel, optSel, batchSel, l2Sel),
       chart.el,
       h('div', { class: 'card' }, stats),
     ),
   );
   renderLayers();
   regen();
-  modal('🧪 Neuron Lab: supervised learning playground', body, {
+  modal('Neuron Lab: supervised learning playground', body, {
+    size: 'wide',
     onClose: () => {
       state.running = false;
       cancelAnimationFrame(raf);
