@@ -42,6 +42,7 @@ import { BrainPanel } from './ui/brainPanel.ts';
 import { MathPanel } from './ui/mathPanel.ts';
 import { CodePanel } from './ui/codePanel.ts';
 import { LearnPanel } from './ui/learnPanel.ts';
+import { openNeuronLab } from './ui/lab.ts';
 import { clear, download, fmt, fmtSteps, h, menu, modal, pickFile, toast } from './ui/dom.ts';
 import { exportOnnx } from './export/onnx.ts';
 import { pytorchScript, slug } from './export/pytorch.ts';
@@ -169,6 +170,7 @@ export class App {
       { id: 'topbar' },
       h('div', { class: 'brand' }, h('span', { class: 'logo' }, '🧠'), h('span', { class: 'txt' }, 'NeuroBlocks ', h('span', null, 'Studio'))),
       h('button', { class: 'btn', onclick: () => this.openMissions() }, '🎯 Missions'),
+      h('button', { class: 'btn', onclick: () => openNeuronLab(), title: 'Neuron Lab: watch a network learn to classify 2D points (supervised learning basics)' }, '🧪 Lab'),
       h('div', { class: 'vsep' }),
       E.trainBtn,
       E.stopBtn,
@@ -1233,6 +1235,7 @@ export class App {
       },
       { label: '🔄 Restart the showcase episode', action: () => this.showcase.reset() },
       { label: '📸 Save a screenshot', action: () => download('neuroblocks.png', dataUrlToBytes(this.view.screenshot()), 'image/png') },
+      { label: '🎬 Record a 10 s video', action: () => this.recordVideo(10) },
     ]);
   }
 
@@ -1276,6 +1279,9 @@ export class App {
         action: () => ok() && download(`${slug(name)}_brain.py`, pytorchScript(this.snap!, name), 'text/x-python'),
       },
       'sep',
+      { label: '📊 Training log: episodes (CSV)', hint: 'step, reward, length…', action: () => this.exportCsv('episodes') },
+      { label: '📊 Training log: metrics (CSV)', hint: 'losses, entropy…', action: () => this.exportCsv('metrics') },
+      'sep',
       { label: 'ℹ️ What are these formats?', action: () => this.explainExports() },
     ]);
   }
@@ -1290,6 +1296,56 @@ export class App {
       howToUse:
         'net.layers[i].W is a row-major [outSize x inSize] matrix (PyTorch nn.Linear layout), b the bias. Forward: x = (obs - obsNorm.mean)/sqrt(obsNorm.var) clipped to ±obsNorm.clip (if obsNorm present); then for each layer x = activation(W·x + b). Outputs: see space (discrete = one softmax per branch; continuous = means; kind "q" = Q-values for every joint action).',
     };
+  }
+
+  private exportCsv(which: 'episodes' | 'metrics'): void {
+    const name = slug(this.compiled?.spec.name ?? 'robot');
+    if (which === 'episodes') {
+      const eps = this.trainingPanel.episodes;
+      if (!eps.length) {
+        toast('No finished episodes yet');
+        return;
+      }
+      const rows = ['step,reward,length,success', ...eps.map((e) => `${e.step},${e.reward},${e.length},${e.success ? 1 : 0}`)];
+      download(`${name}_episodes.csv`, rows.join('\n'), 'text/csv');
+      return;
+    }
+    const ms = this.trainingPanel.metrics;
+    if (!ms.length) {
+      toast('No training updates yet');
+      return;
+    }
+    const keys = [...new Set(ms.flatMap((m) => Object.keys(m)))];
+    const rows = [keys.join(','), ...ms.map((m) => keys.map((k) => (m[k] === undefined ? '' : String(m[k]))).join(','))];
+    download(`${name}_metrics.csv`, rows.join('\n'), 'text/csv');
+  }
+
+  private recordVideo(seconds = 10): void {
+    const canvas = this.view.renderer.domElement as HTMLCanvasElement & { captureStream?: (fps: number) => MediaStream };
+    if (!canvas.captureStream || typeof MediaRecorder === 'undefined') {
+      toast('Video recording is not supported in this browser');
+      return;
+    }
+    const stream = canvas.captureStream(30);
+    const type = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'].find((t) => MediaRecorder.isTypeSupported(t)) ?? '';
+    const rec = new MediaRecorder(stream, type ? { mimeType: type, videoBitsPerSecond: 6_000_000 } : undefined);
+    const chunks: Blob[] = [];
+    rec.ondataavailable = (e) => {
+      if (e.data.size) chunks.push(e.data);
+    };
+    rec.onstop = () => {
+      const blob = new Blob(chunks, { type: rec.mimeType || 'video/webm' });
+      const url = URL.createObjectURL(blob);
+      const a = h('a', { href: url, download: `neuroblocks-${Date.now()}.${(rec.mimeType || '').includes('mp4') ? 'mp4' : 'webm'}` });
+      document.body.append(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      toast('🎬 Video saved');
+    };
+    rec.start(250);
+    toast(`🎬 Recording the 3D view for ${seconds} s…`, 2000);
+    setTimeout(() => rec.state !== 'inactive' && rec.stop(), seconds * 1000);
   }
 
   private explainExports(): void {

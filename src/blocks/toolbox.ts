@@ -105,6 +105,7 @@ export function toolbox(): object {
           B('nb_areas'),
           B('nb_is_next'),
           B('nb_laps'),
+          B('nb_cp_count'),
           B('nb_ep_reward'),
           B('nb_last_action'),
           B('nb_random'),

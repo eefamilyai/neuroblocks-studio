@@ -27,6 +27,7 @@ The neural network, backpropagation, PPO, DQN, REINFORCE, neuroevolution and the
 | 🔧 **Under the hood** | Live learning curves with run-vs-run comparison, a clickable network diagram (every neuron's `z = Σ w·x + b` with the actual numbers), weight matrices and histograms, the exact input vector with saliency, action probabilities, critic value, Q-values, the algorithm's equations with live values, an exploration heatmap and a **value map** painted on the ground. |
 | </> **See the code** | Your event blocks compile to readable JavaScript, and the network is shown as PyTorch code. |
 | 💾 **Export the brain** | **JSON** (readable, re-importable), **ONNX** (Netron, onnxruntime, Unity Sentis…), or a standalone **PyTorch/NumPy `.py`** with the weights inside. All three are tested to reproduce the browser's outputs to about 1e‑7. |
+| 🧪 **Neuron Lab** | A supervised-learning playground: a network learns to separate 2D datasets (circle, XOR, spiral, moons…). Watch the decision boundary bend, compare train vs test loss (overfitting!), and try feature engineering (x², y²…), activations, learning rates and optimizers. |
 | 🎯 **17 missions** | Ready-made, fully editable block programs, from "reach the flag in 30 seconds" to soccer, racing with smooth controls, mazes, parkour and crate pushing. Each one explains what it teaches and suggests an experiment to try next. |
 
 <table>
@@ -42,6 +43,9 @@ The neural network, backpropagation, PPO, DQN, REINFORCE, neuroevolution and the
 <td><img src="docs/screenshots/math.png" alt="Math tab explaining PPO with live numbers"><br><b>∑ Math tab.</b> The algorithm, step by step, using your run's numbers.</td>
 <td><img src="docs/screenshots/missions.png" alt="Missions dialog"><br><b>🎯 Missions.</b> Load one, press ▶, then change the blocks.</td>
 </tr>
+<tr>
+<td colspan="2"><img src="docs/screenshots/lab.png" alt="Neuron Lab learning a spiral"><br><b>🧪 Neuron Lab.</b> Supervised learning from first principles: the same engine learning to separate a spiral.</td>
+</tr>
 </table>
 
 ## Quick start
@@ -51,6 +55,7 @@ The neural network, backpropagation, PPO, DQN, REINFORCE, neuroevolution and the
 3. Open **🧠 Brain** while it drives and click neurons. Open **👁️ Senses** to see exactly what the network receives.
 4. Change something: delete the *"how much closer I got"* reward, add ray eyes, try **🧬 Evolution** instead of PPO. Press **⟲ New brain** and compare the curves (the old run stays dashed).
 5. **💾 Export brain** to take it anywhere.
+6. New to neural networks? Start with **🧪 Lab** in the top bar to see a network learn to separate coloured dots.
 
 Keyboard: `Ctrl+Enter` train/pause · `Ctrl+S` save project · in 🎮 mode `WASD`/arrows drive, `Space` jump, `F` kick, `Q`/`E` slide.
 

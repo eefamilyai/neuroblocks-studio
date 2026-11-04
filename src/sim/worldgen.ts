@@ -84,22 +84,22 @@ class Builder {
   }
 
   /** A wall segment between two points on the ground. */
-  wall(x0: number, z0: number, x1: number, z1: number, height: number, thick: number, tag: StaticTag, mat: Material, color: number, zone: string, base = 0, gate = false): void {
+  wall(x0: number, z0: number, x1: number, z1: number, height: number, thick: number, tag: StaticTag, mat: Material, color: number, zone: string, base = 0, gate = false, invisible = false): void {
     const dx = x1 - x0;
     const dz = z1 - z0;
     const len = Math.hypot(dx, dz);
     if (len < 1e-6) return;
     // axis-aligned walls stay unrotated (exact & fast collisions for crates)
     if (Math.abs(dz) < 1e-9) {
-      this.box((x0 + x1) / 2, base + height / 2, z0, len / 2, height / 2, thick / 2, tag, mat, color, zone, { gate });
+      this.box((x0 + x1) / 2, base + height / 2, z0, len / 2, height / 2, thick / 2, tag, mat, color, zone, { gate, invisible });
       return;
     }
     if (Math.abs(dx) < 1e-9) {
-      this.box(x0, base + height / 2, (z0 + z1) / 2, thick / 2, height / 2, len / 2, tag, mat, color, zone, { gate });
+      this.box(x0, base + height / 2, (z0 + z1) / 2, thick / 2, height / 2, len / 2, tag, mat, color, zone, { gate, invisible });
       return;
     }
     const yaw = Math.atan2(dx, dz); // local +Z runs along the wall
-    this.box((x0 + x1) / 2, base + height / 2, (z0 + z1) / 2, thick / 2, height / 2, len / 2, tag, mat, color, zone, { yaw, gate });
+    this.box((x0 + x1) / 2, base + height / 2, (z0 + z1) / 2, thick / 2, height / 2, len / 2, tag, mat, color, zone, { yaw, gate, invisible });
   }
 
   cyl(x: number, z: number, y0: number, y1: number, r: number, tag: StaticTag, mat: Material, color: number, zone: string): void {
@@ -144,6 +144,22 @@ class Builder {
       ['e', r.maxX, r.minZ, r.maxX, r.maxZ],
     ];
     for (const [side, x0, z0, x1, z1] of sides) {
+      // invisible "glass" above the fence so jumping robots can't escape the zone
+      // (the part above the gate opens with the gate in free roam)
+      if (gate && gate.side === side) {
+        const horiz = side === 'n' || side === 's';
+        const a = gate.at - gate.width / 2;
+        const bb = gate.at + gate.width / 2;
+        if (horiz) {
+          this.wall(x0, z0, a, z1, 8, t, 'wall', mat, color, zone, base + h, false, true);
+          this.wall(bb, z0, x1, z1, 8, t, 'wall', mat, color, zone, base + h, false, true);
+          this.wall(a, z0, bb, z1, 8, t, 'wall', mat, color, zone, base + h, true, true);
+        } else {
+          this.wall(x0, z0, x1, a, 8, t, 'wall', mat, color, zone, base + h, false, true);
+          this.wall(x0, bb, x1, z1, 8, t, 'wall', mat, color, zone, base + h, false, true);
+          this.wall(x0, a, x1, bb, 8, t, 'wall', mat, color, zone, base + h, true, true);
+        }
+      } else this.wall(x0, z0, x1, z1, 8, t, 'wall', mat, color, zone, base + h, false, true);
       if (gate && gate.side === side) {
         const horiz = side === 'n' || side === 's';
         const a = gate.at - gate.width / 2;
@@ -364,8 +380,9 @@ function maze(b: Builder, cx: number, cz: number): void {
   for (let k = key(N - 1, 0); k !== -1; k = prev.get(k) ?? -1) path.unshift(k);
   const centre = (k: number) => [x0 + ((k % N) + 0.5) * S, z0 + (Math.floor(k / N) + 0.5) * S];
   let idx = 0;
-  // one checkpoint per corridor cell: the next one is always reachable in a straight line
-  for (let i = 1; i < path.length - 1; i++) {
+  // one checkpoint per corridor cell (the last one sits on the trophy): the next one is
+  // always reachable in a straight line, and the final one leads straight to the goal
+  for (let i = 1; i < path.length; i++) {
     const [x, z] = centre(path[i]);
     const [px, pz] = centre(path[i - 1]);
     const yaw = Math.atan2(x - px, z - pz) + Math.PI / 2;
@@ -438,33 +455,37 @@ function summit(b: Builder, cx: number, cz: number, rng: RNG): void {
   const r = plotRect(cx, cz);
   b.floor(r, 'grass', C.grassDark, id);
   b.fence(r, id, { side: 's', at: cx, width: 4 });
+  // three stacked tiers…
   const tier = (h: number, top: number, color: number) => b.aabb(cx - h, 0, cz - h, cx + h, top, cz + h, 'rock', 'stone', color, id);
-  tier(12, 2, 0x8b8f7a);
-  tier(6, 4, 0x9c9f88);
-  tier(3, 6, 0xb0b39a);
-  b.ramp(cx, cz + 20, 0, cx, cz + 12, 2, 4, id);
-  b.ramp(cx + 9, cz + 8, 2, cx + 9, cz - 2, 4, 4, id);
-  b.aabb(cx + 6, 0, cz - 6, cx + 12, 4, cz - 2, 'rock', 'stone', 0x9c9f88, id); // landing 2
-  b.ramp(cx - 4.5, cz + 6, 4, cx - 4.5, cz, 6, 3, id);
-  b.aabb(cx - 6, 0, cz - 6, cx - 3, 6, cz, 'rock', 'stone', 0xb0b39a, id); // landing 3
-  b.obj('flag', cx, 6, cz, id);
+  tier(14, 1.8, 0x8b8f7a);
+  tier(8.5, 3.4, 0x9c9f88);
+  tier(3.5, 5.0, 0xb0b39a);
+  // …joined by a spiral of ramps: south → east → north
+  b.ramp(cx, cz + 21, 0, cx, cz + 14, 1.8, 4, id);
+  b.ramp(cx + 13.6, cz, 1.8, cx + 8.5, cz, 3.4, 4, id);
+  b.ramp(cx, cz - 8.4, 3.4, cx, cz - 3.5, 5.0, 3.2, id);
+  // checkpoints at the foot of each ramp (the route up)
+  b.obj('checkpoint', cx, 1.2, cz + 21, id, { index: 0, yaw: Math.PI / 2, hx: 0.5, hy: 1.2, hz: 2.4 });
+  b.obj('checkpoint', cx + 13.4, 3.0, cz, id, { index: 1, yaw: 0, hx: 0.5, hy: 1.2, hz: 2.4 });
+  b.obj('checkpoint', cx, 4.6, cz - 8.4, id, { index: 2, yaw: Math.PI / 2, hx: 0.5, hy: 1.2, hz: 2 });
+  b.obj('flag', cx, 5.0, cz, id);
   for (let i = 0; i < 10; i++) {
     const a = rng.uniform(0, Math.PI * 2);
-    const d = rng.uniform(15, 19);
+    const d = rng.uniform(16.5, 20);
     const x = Math.cos(a) * d;
     const z = Math.sin(a) * d;
-    if (z > 12 && Math.abs(x) < 5) continue;
-    b.cyl(cx + x, cz + z, 0, rng.uniform(0.6, 1.4), rng.uniform(0.6, 1.2), 'rock', 'stone', C.rock, id);
+    if (z > 14 && Math.abs(x) < 5) continue;
+    b.cyl(cx + x, cz + z, 0, rng.uniform(0.6, 1.4), rng.uniform(0.6, 1.1), 'rock', 'stone', C.rock, id);
   }
   addZone(b, {
     id,
     name: 'Summit',
     emoji: '⛰️',
-    blurb: 'A three-tier mountain with ramps winding up to a flag at the top (6 m high). Teaches climbing and long-term planning.',
+    blurb: 'A three-tier mountain. A spiral of ramps (south, then east, then north) leads to the flag on top. Purple checkpoints mark the foot of each ramp.',
     rect: r,
-    spawn: { x: cx, z: cz + 18, yaw: Math.PI },
+    spawn: { x: cx, z: cz + 19, yaw: Math.PI },
     area: plotRect(cx, cz, 3),
-    spawnArea: localRect(cx, cz, -8, 15, 8, 20),
+    spawnArea: localRect(cx, cz, -10, 16, 10, 20),
     color: '#9c9f88',
     missions: ['hill-climb'],
   });
@@ -502,6 +523,7 @@ function raceTrack(b: Builder, cx: number, cz: number): void {
     area: plotRect(cx, cz, 2),
     spawnArea: localRect(cx, cz, -7, 13, -3, 18),
     color: '#4a4a55',
+    loopCheckpoints: true,
     missions: ['race-laps'],
   });
 }

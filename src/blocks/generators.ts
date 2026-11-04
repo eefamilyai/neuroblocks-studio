@@ -110,6 +110,7 @@ export function installGenerators(): void {
   f.nb_areas = () => ['api.areasVisited()', Order.FUNCTION_CALL];
   f.nb_is_next = (b) => [`api.isNext(${touchedRef(b)})`, Order.FUNCTION_CALL];
   f.nb_laps = () => ['api.laps()', Order.FUNCTION_CALL];
+  f.nb_cp_count = () => ['api.checkpoint()', Order.FUNCTION_CALL];
   f.nb_ep_reward = () => ['api.episodeReward()', Order.FUNCTION_CALL];
   f.nb_random = (b) => [`api.random(${safeNum(b.getFieldValue('A'))}, ${safeNum(b.getFieldValue('B'), 1)})`, Order.FUNCTION_CALL];
   f.nb_last_action = (b) => [`api.lastAction(${T(b, 'AXIS')})`, Order.FUNCTION_CALL];

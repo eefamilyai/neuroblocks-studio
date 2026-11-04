@@ -525,7 +525,8 @@ export function blockDefinitions(): object[] {
     { type: 'nb_new_area', message0: 'entered a new area?', output: 'Boolean', style: 'measure_blocks', tooltip: 'True when the robot steps onto a 2×2 m tile it has not visited this episode. Rewarding this = curiosity!' },
     { type: 'nb_areas', message0: 'areas explored', output: 'Number', style: 'measure_blocks', tooltip: 'How many 2×2 m tiles visited this episode.' },
     { type: 'nb_is_next', message0: 'touched checkpoint is the next one?', output: 'Boolean', style: 'measure_blocks', tooltip: 'Use inside "when I touch checkpoint" to enforce the right order.' },
-    { type: 'nb_laps', message0: 'laps completed', output: 'Number', style: 'measure_blocks', tooltip: 'Full rounds of all checkpoints.' },
+    { type: 'nb_laps', message0: 'laps completed', output: 'Number', style: 'measure_blocks', tooltip: 'Full rounds of all checkpoints (race track).' },
+    { type: 'nb_cp_count', message0: 'checkpoints passed', output: 'Number', style: 'measure_blocks', tooltip: 'How many checkpoints have been passed in order this episode (this lap on a circuit).' },
     { type: 'nb_ep_reward', message0: 'reward so far this episode', output: 'Number', style: 'measure_blocks', tooltip: 'Sum of all rewards in this episode.' },
     { type: 'nb_random', message0: 'random from %1 to %2', args0: [num('A', 0), num('B', 1)], output: 'Number', style: 'measure_blocks', tooltip: 'A random number.' },
     {

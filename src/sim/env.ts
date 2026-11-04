@@ -553,6 +553,11 @@ export class Env {
     this.jumpCd -= T;
     this.kickCd -= T;
     if (this.a.y < PHYS.fallY) this.fell = true;
+    if (!this.freeRoam) {
+      const r = this.zone.rect;
+      const m = 3;
+      if (this.a.x < r.minX - m || this.a.x > r.maxX + m || this.a.z < r.minZ - m || this.a.z > r.maxZ + m) this.fell = true;
+    }
 
     // triggers & contacts with objects
     const a = this.a;
@@ -1479,12 +1484,18 @@ export class ScriptAPI {
   }
   advance(): void {
     const total = this.e.objs.filter((o) => o.type === 'checkpoint').length;
-    if (!total) return;
+    if (!total || this.e.nextCp >= total) return;
     this.e.nextCp++;
     if (this.e.nextCp >= total) {
-      this.e.nextCp = 0;
-      this.e.laps++;
-      this.e.events.push(`lap ${this.e.laps}! 🏁`);
+      if (this.e.zone.loopCheckpoints || this.e.freeRoam) {
+        // a circuit: start the next lap
+        this.e.nextCp = 0;
+        this.e.laps++;
+        this.e.events.push(`lap ${this.e.laps}! 🏁`);
+      } else {
+        // a route (maze, summit): all done, there is no "next checkpoint" any more
+        this.e.events.push('all checkpoints passed! 🏁');
+      }
     }
   }
   checkpoint(): number {

@@ -44,6 +44,7 @@ export class LearnPanel {
         h(
           'div',
           { class: 'card small', style: { lineHeight: '1.6' } },
+          h('div', null, '0️⃣ 🧪 Lab (top bar): see a network learn to separate dots, the basics of all ML.'),
           h('div', null, '1️⃣ 🚩 First Steps → watch the reward curve rise.'),
           h('div', null, '2️⃣ Open 🧠 Brain while it drives; click neurons.'),
           h('div', null, '3️⃣ Same task with 🧬 Evolution and 🎯 DQN: compare the dashed curves.'),

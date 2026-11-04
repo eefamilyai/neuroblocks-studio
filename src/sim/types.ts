@@ -110,6 +110,8 @@ export interface ZoneDef {
   floorY: number;
   color: string;
   needsJump?: boolean;
+  /** checkpoints form a loop (race track): after the last one, start over and count a lap */
+  loopCheckpoints?: boolean;
   /** suggested mission ids */
   missions: string[];
 }
