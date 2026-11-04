@@ -132,6 +132,7 @@ export class App {
     this.initBlockly();
     this.initViewport();
     this.client.onMessage = (m) => this.onWorker(m);
+    this.client.onFallback = () => this.log('ℹ️ Background workers are not available here, so training runs on the main thread (a bit slower, same results).', 'warn');
     this.showcase.onStep = (info) => this.onShowcaseStep(info);
     this.showcase.onBeforeStep = () => this.objLayer.snapshotPrev();
     this.showcase.onError = (m) => this.log(m, 'err');
@@ -229,8 +230,8 @@ export class App {
       driveSeg.append(h('button', { 'data-v': m, title: t, onclick: () => this.setDriveMode(m) }, l));
     E.speedSel = h('select', { class: 'sel', title: 'Showcase speed', onchange: () => (this.showcase.speed = Number((E.speedSel as HTMLSelectElement).value)) });
     for (const s of [0.25, 0.5, 1, 2, 4, 8]) E.speedSel.append(h('option', { value: String(s), selected: s === 1 }, `${s}×`));
-    E.viewBtn = h('button', { class: 'btn small', onclick: () => this.openViewMenu() }, '👁️ Show ▾');
-    E.buildBtn = h('button', { class: 'btn small', onclick: () => this.toggleBuild(), title: 'Place your own objects and walls in the world' }, '🧱 Build');
+    E.viewBtn = h('button', { class: 'btn small', onclick: () => this.openViewMenu(), title: 'What to show in the 3D view: rays, ghosts, heatmap, value map…' }, '👁️ ▾');
+    E.buildBtn = h('button', { class: 'btn small', onclick: () => this.toggleBuild(), title: 'Build mode: place your own objects and walls in the world' }, '🧱');
     E.recBtn = h('button', { class: 'btn small', style: { display: 'none' }, onclick: () => this.toggleRecord(), title: 'Record your driving as training examples' }, '⏺ Record');
     E.cloneBtn = h('button', { class: 'btn small warn', style: { display: 'none' }, onclick: () => this.startCloning(), title: 'Train the brain to copy your recorded driving (supervised learning)' }, '🎓 Learn from me');
     E.hud = h('div', { class: 'hud hud-tl' });
@@ -254,7 +255,7 @@ export class App {
     const tabs = h('div', { class: 'tabs' });
     const hoodBody = h('div', { style: { flex: '1', display: 'flex', flexDirection: 'column', minHeight: '0' } });
     const tabDefs: [Tab, string, HTMLElement][] = [
-      ['train', '📈 Training', this.trainingPanel.el],
+      ['train', '📈 Train', this.trainingPanel.el],
       ['brain', '🧠 Brain', this.brainPanel.el],
       ['senses', '👁️ Senses', this.sensesPanel.el],
       ['math', '∑ Math', this.mathPanel.el],
@@ -267,7 +268,7 @@ export class App {
       this.tabBodies.set(id, wrap);
       hoodBody.append(wrap);
     }
-    const hoodPane = h('section', { class: 'pane', id: 'pane-hood' }, h('div', { class: 'pane-head' }, h('span', { class: 'pane-title' }, '🔧 Under the hood'), tabs), hoodBody);
+    const hoodPane = h('section', { class: 'pane', id: 'pane-hood' }, h('div', { class: 'pane-head', title: 'Under the hood: everything the robot and the learning algorithm are doing' }, h('span', { class: 'pane-title' }, '🔧'), tabs), hoodBody);
     E.tabs = tabs;
 
     const split1 = h('div', { class: 'splitter' });
@@ -333,9 +334,10 @@ export class App {
       theme: neuroTheme(),
       renderer: 'zelos',
       media: './media/',
-      trashcan: true,
+      // the single-file build has no media folder: hide the icon-based controls there
+      trashcan: import.meta.env.MODE !== 'single',
       sounds: false,
-      zoom: { controls: true, wheel: true, startScale: 0.62, maxScale: 1.6, minScale: 0.25, scaleSpeed: 1.12 },
+      zoom: { controls: import.meta.env.MODE !== 'single', wheel: true, startScale: 0.62, maxScale: 1.6, minScale: 0.25, scaleSpeed: 1.12 },
       grid: { spacing: 26, length: 2, colour: '#262c48', snap: false },
       move: { scrollbars: true, drag: true, wheel: false },
     });
@@ -580,6 +582,11 @@ export class App {
     this.heat.clear();
     this.stats.steps = 0;
     this.stats.episodes = 0;
+    this.stats.meanReward = NaN;
+    this.stats.success = NaN;
+    this.el.reward.textContent = '–';
+    this.el.steps.textContent = '0';
+    this.el.episodes.textContent = '0';
     this.lastSuccessMilestone = 0;
     this.firstSuccessShown = false;
     this.trainingPanel.setAlgo(algo ?? spec.train.algo);
@@ -1507,6 +1514,7 @@ export class App {
           h('div', { class: 'step' }, h('b', null, '🔧 4. Under the hood'), h('p', null, 'Right side. Live learning curves, every neuron and weight, the exact sensor numbers, the maths, and the generated code. Export the trained brain as JSON / ONNX / PyTorch.')),
         ),
         h('p', { class: 'small muted' }, 'Everything (neural network, backpropagation, PPO, DQN, evolution, physics) is written from scratch in TypeScript and runs in your browser. No servers, no ML libraries, nothing hidden.'),
+        h('p', { class: 'small muted' }, '⌨️ Ctrl+Enter train/pause · Ctrl+S save project · WASD/arrows drive (🎮 mode) · Space jump · F kick · Esc leave build mode · mouse: drag to orbit, right-drag to pan, wheel to zoom.'),
       ),
       {
         foot: [

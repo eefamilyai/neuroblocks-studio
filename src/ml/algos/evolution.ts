@@ -36,7 +36,7 @@ export class Evolution implements Algorithm {
   private evals: Int32Array;
   private assign: Int32Array;
   private nextIdx = 0;
-  private finished = 0;
+  private evaluated = 0;
   generation = 0;
   sigma: number;
   best: MLP;
@@ -94,7 +94,7 @@ export class Evolution implements Algorithm {
     this.sums.fill(0);
     this.evals.fill(0);
     this.nextIdx = 0;
-    this.finished = 0;
+    this.evaluated = 0;
     this.assign.fill(-1);
     for (let i = 0; i < this.vec.n; i++) {
       if (this.nextIdx < this.P) {
@@ -111,7 +111,7 @@ export class Evolution implements Algorithm {
     this.sums[k] += reward;
     this.evals[k]++;
     if (this.evals[k] >= Math.max(1, this.spec.train.episodesPerEval)) {
-      this.finished++;
+      this.evaluated++;
       this.assign[envIndex] = this.nextIdx < this.P ? this.nextIdx++ : -1;
     }
   }
@@ -131,8 +131,8 @@ export class Evolution implements Algorithm {
       this.head.sample(out, 0, null, this.rng, this.actBuf, i * D, true);
     }
     vec.step(this.actBuf);
-    this.phase = `generation ${this.generation + 1}: evaluated ${this.finished}/${this.P} brains`;
-    if (this.finished >= this.P) this.nextGeneration();
+    this.phase = `generation ${this.generation + 1}: evaluated ${this.evaluated}/${this.P} brains`;
+    if (this.evaluated >= this.P) this.nextGeneration();
   }
 
   private nextGeneration(): void {

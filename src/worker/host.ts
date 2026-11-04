@@ -107,6 +107,13 @@ export class TrainingHost {
       const g = tr.ghosts().slice();
       this.post({ type: 'ghosts', data: g }, [g.buffer]);
     }
+    if (tr.algo.finished?.()) {
+      this.running = false;
+      this.sendProgress(true);
+      this.post({ type: 'brain', snap: tr.snapshot() });
+      this.post({ type: 'finished', reason: `the copy is done (${tr.algo.updates} updates). Press ▶ Train to polish it with reinforcement learning` });
+      return false;
+    }
     const stop = tr.spec.train.stopSteps;
     if (stop > 0 && tr.totalSteps >= stop) {
       this.running = false;

@@ -52,6 +52,9 @@ export class BehaviorCloning implements Algorithm {
   private last: Record<string, number> = {};
   private nobs: Float32Array;
   private actBuf: Float32Array;
+  /** stops after this many gradient updates (supervised learning converges; no need to run forever) */
+  readonly maxUpdates: number;
+  private sinceLog = 0;
 
   constructor(vec: VecEnv, spec: AgentSpec, space: ActionSpace, demos: DemoSet, init: BrainSnapshot | null) {
     this.vec = vec;
@@ -72,13 +75,19 @@ export class BehaviorCloning implements Algorithm {
     this.norm.normalize(demos.obs, this.nDemo, demos.count);
     this.opt = makeOptimizer(spec.train.optimizer, this.actor.params('actor.'), Math.max(1e-4, spec.train.lr * 3));
     this.perm = shuffleIndices(demos.count, this.rng);
+    this.maxUpdates = Math.max(600, Math.min(4000, Math.ceil((demos.count / 128) * 60)));
     this.nobs = new Float32Array(vec.n * vec.obsSize);
     this.actBuf = new Float32Array(vec.n * vec.actDims);
     vec.onEpisode = (r) => this.stats.addEpisode(r);
     vec.reset();
   }
 
+  finished(): boolean {
+    return this.updates >= this.maxUpdates;
+  }
+
   work(): void {
+    if (this.finished()) return;
     // interleave: 6 learning steps, then 1 step of testing the copy in the world
     if (this.sinceEval >= 6) {
       this.sinceEval = 0;
@@ -143,11 +152,15 @@ export class BehaviorCloning implements Algorithm {
     this.acc.correct += correct / M;
     this.acc.n++;
     this.mb++;
-    this.phase = `copying your driving: epoch ${this.epoch + 1}, batch ${this.mb}/${numMb}`;
+    this.sinceLog++;
+    this.phase = `copying your driving: epoch ${this.epoch + 1}, batch ${this.mb}/${numMb} (${this.updates}/${this.maxUpdates} updates)`;
     if (this.mb >= numMb) {
       this.mb = 0;
       this.epoch++;
       shuffleIndices(demos.count, this.rng, this.perm);
+    }
+    if (this.sinceLog >= 25 || this.finished()) {
+      this.sinceLog = 0;
       this.last = {
         epoch: this.epoch,
         loss: this.acc.loss / this.acc.n,

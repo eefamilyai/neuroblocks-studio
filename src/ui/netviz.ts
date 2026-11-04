@@ -344,7 +344,8 @@ export class NetViz {
     const bias = layer.b[i];
     const isOut = l === b.net.layers.length;
     const contribs = Array.from({ length: I }, (_, k) => ({ k, w: layer.W[i * I + k], x: xin ? xin[k] : NaN, c: xin ? layer.W[i * I + k] * xin[k] : NaN }));
-    contribs.sort((p, q) => Math.abs(q.c || q.w) - Math.abs(p.c || p.w));
+    const mag = (t: { c: number; w: number }) => Math.abs(Number.isFinite(t.c) ? t.c : t.w);
+    contribs.sort((p, q) => mag(q) - mag(p));
     const top = contribs.slice(0, 8);
     const maxC = Math.max(1e-9, ...top.map((t) => Math.abs(Number.isFinite(t.c) ? t.c : t.w)));
     const info = ACTIVATION_INFO[layer.act];

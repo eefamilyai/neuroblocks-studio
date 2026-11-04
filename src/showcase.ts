@@ -105,7 +105,7 @@ export class Showcase {
     }
     this.acc += dt * this.speed;
     let n = 0;
-    const maxSteps = Math.max(2, Math.ceil(this.speed * 1.5));
+    const maxSteps = Math.max(5, Math.ceil(this.speed * 4));
     while (this.acc >= this.stepDt && n < maxSteps) {
       this.acc -= this.stepDt;
       this.stepOnce();

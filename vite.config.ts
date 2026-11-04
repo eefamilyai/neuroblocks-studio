@@ -12,5 +12,6 @@ export default defineConfig(({ mode }) => ({
     chunkSizeWarningLimit: 4000,
     emptyOutDir: true,
   },
-  worker: { format: 'es' },
+  // classic (iife) workers also boot from blob: URLs in pages opened via file://
+  worker: { format: 'iife' },
 }));

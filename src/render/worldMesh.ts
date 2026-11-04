@@ -341,10 +341,12 @@ function addDecor(group: THREE.Group, world: WorldDef, decor: DecorDef[], rng: R
       group.add(post);
     }
     const tex = textTexture(bn.text ?? 'START', 512, 96, '#ffffff', '#c62828');
-    const board = new THREE.Mesh(new THREE.PlaneGeometry(w, 1.1), new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }));
-    board.rotation.y = Math.PI / 2;
-    board.position.set(bn.x, 4.0, bn.z);
-    group.add(board);
+    for (const side of [1, -1]) {
+      const board = new THREE.Mesh(new THREE.PlaneGeometry(w, 1.1), new THREE.MeshBasicMaterial({ map: tex }));
+      board.rotation.y = (side * Math.PI) / 2;
+      board.position.set(bn.x + side * 0.02, 4.0, bn.z);
+      group.add(board);
+    }
     // checkered line
     const check = checkerTexture();
     const line = new THREE.Mesh(new THREE.PlaneGeometry(1.2, w).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: check, roughness: 0.9 }));

@@ -364,7 +364,8 @@ function maze(b: Builder, cx: number, cz: number): void {
   for (let k = key(N - 1, 0); k !== -1; k = prev.get(k) ?? -1) path.unshift(k);
   const centre = (k: number) => [x0 + ((k % N) + 0.5) * S, z0 + (Math.floor(k / N) + 0.5) * S];
   let idx = 0;
-  for (let i = 2; i < path.length - 1; i += 2) {
+  // one checkpoint per corridor cell: the next one is always reachable in a straight line
+  for (let i = 1; i < path.length - 1; i++) {
     const [x, z] = centre(path[i]);
     const [px, pz] = centre(path[i - 1]);
     const yaw = Math.atan2(x - px, z - pz) + Math.PI / 2;

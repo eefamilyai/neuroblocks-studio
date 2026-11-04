@@ -174,6 +174,8 @@ export interface Algorithm {
   explain(): Record<string, number | string>;
   stats: StatsLog;
   updates: number;
+  /** optional: algorithms with a natural end (behaviour cloning) */
+  finished?(): boolean;
 }
 
 /**
