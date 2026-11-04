@@ -12,6 +12,10 @@ export interface ProjectFile {
   edits: WorldEdits;
   brain: BrainSnapshot | null;
   episodes?: EpisodeRecord[];
+  /** which editor the program lives in (default: blocks) */
+  editor?: 'blocks' | 'code';
+  /** code-mode program */
+  code?: string;
 }
 
 const KEY = 'neuroblocks.autosave.v1';

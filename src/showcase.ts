@@ -28,7 +28,12 @@ export class Showcase {
   deterministic = false;
   private rng = new RNG(2024);
   private acc = 0;
-  readonly stepDt = PHYS.dt * PHYS.substeps;
+  /** seconds per brain decision (physics tick × ticks per decision) */
+  get stepDt(): number {
+    return PHYS.dt * (this.env ? this.env.P.substeps : PHYS.substeps);
+  }
+  /** shown in the 3D view, e.g. "checkpoint 3/12" when watching an older brain */
+  label = '';
   alpha = 1;
   prev = { x: 0, y: 0, z: 0, yaw: 0 };
   action = new Float32Array(8);
@@ -103,16 +108,17 @@ export class Showcase {
       this.alpha = 1;
       return 0;
     }
+    const sdt = this.stepDt;
     this.acc += dt * this.speed;
     let n = 0;
     const maxSteps = Math.max(5, Math.ceil(this.speed * 4));
-    while (this.acc >= this.stepDt && n < maxSteps) {
-      this.acc -= this.stepDt;
+    while (this.acc >= sdt && n < maxSteps) {
+      this.acc -= sdt;
       this.stepOnce();
       n++;
     }
-    if (n === maxSteps) this.acc = Math.min(this.acc, this.stepDt);
-    this.alpha = Math.min(1, this.acc / this.stepDt);
+    if (n === maxSteps) this.acc = Math.min(this.acc, sdt);
+    this.alpha = Math.min(1, this.acc / sdt);
     return n;
   }
 

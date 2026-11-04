@@ -4,19 +4,26 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NeuroBlocks Studio</title>
-    <meta name="description" content="A Scratch-style studio for training neural-network robots in a 3D world. Build with blocks, watch them learn, see every number under the hood, export the weights." />
-    <meta name="theme-color" content="#0f1222" />
+    <meta name="description" content="A Scratch-style studio for training neural-network robots in a 3D world. Build with blocks or code, watch them learn, see every number under the hood, export the weights." />
+    <meta name="theme-color" content="#0f131b" />
     <link rel="icon" type="image/png" href="./favicon.png" />
     <link rel="apple-touch-icon" href="./icon-192.png" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    <style>
+      html,body{margin:0;height:100%;background:#0a0d13}
+      #boot{position:fixed;inset:0;z-index:100;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:#0a0d13;color:#e7eaf1;font:14px system-ui,sans-serif;transition:opacity .35s}
+      #boot .boot-mark{width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#6e8bff,#9b7bff);animation:bp 1.4s ease-in-out infinite}
+      #boot .boot-sub{color:#6b7489;font-size:12px}
+      @keyframes bp{50%{transform:scale(.9);opacity:.8}}
+    </style>
   </head>
   <body>
     <div id="boot">
-      <div class="boot-logo">🧠</div>
-      <div class="boot-title">NeuroBlocks <span>Studio</span></div>
+      <div class="boot-mark"></div>
+      <div class="boot-title" style="font-weight:650;font-size:18px">NeuroBlocks Studio</div>
       <div class="boot-sub">building the world…</div>
     </div>
     <div id="app"></div>

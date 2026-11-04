@@ -119,10 +119,11 @@ export class NetViz {
   private layout(W: number, H: number): void {
     const sizes = this.layerSizes();
     const L = sizes.length;
-    const left = 128;
-    const right = 132;
+    // label columns shrink on narrow panels so the network itself keeps some room
+    const left = Math.min(128, Math.max(72, W * 0.26));
+    const right = Math.min(132, Math.max(84, W * 0.27));
     const top = 14;
-    const bottom = 14;
+    const bottom = 22;
     this.pos = sizes.map((n, l) => {
       const x = left + (L === 1 ? 0 : (l / (L - 1)) * (W - left - right));
       const avail = H - top - bottom;
@@ -182,8 +183,8 @@ export class NetViz {
     g.clearRect(0, 0, W, H);
     const b = this.brain;
     if (!b) {
-      g.fillStyle = '#5b6388';
-      g.font = '13px Nunito';
+      g.fillStyle = '#5f687d';
+      g.font = '13px Inter, sans-serif';
       g.textAlign = 'center';
       g.fillText('No brain yet: fix the blocks, then the network appears here.', W / 2, H / 2);
       return;
@@ -253,15 +254,16 @@ export class NetViz {
       }
     }
     // ---- labels ----
-    g.font = '10px Nunito, sans-serif';
+    g.font = '10px Inter, sans-serif';
     const inCol = this.pos[0];
     const showIn = inCol.length <= 64;
     if (showIn) {
       g.textAlign = 'right';
       inCol.forEach((p, i) => {
-        g.fillStyle = '#9aa3c7';
+        g.fillStyle = '#8a93a8';
         const lab = this.inputLabel(i);
-        g.fillText(lab.length > 20 ? lab.slice(0, 19) + '…' : lab, p.x - p.r - 5, p.y + 3);
+        const maxC = Math.max(8, Math.floor((p.x - p.r - 8) / 5.6));
+        g.fillText(lab.length > maxC ? lab.slice(0, maxC - 1) + '…' : lab, p.x - p.r - 5, p.y + 3);
       });
     }
     const outCol = this.pos[nL - 1];
@@ -285,27 +287,31 @@ export class NetViz {
         pr = probs[0][j];
       }
       if (pr !== null) {
-        g.fillStyle = 'rgba(139,108,255,0.35)';
+        g.fillStyle = 'rgba(155,123,255,0.3)';
         g.fillRect(p.x + p.r + 4, p.y - 5, 40, 10);
-        g.fillStyle = isChosen ? '#ffd166' : '#8b6cff';
+        g.fillStyle = isChosen ? '#f2b84b' : '#9b7bff';
         g.fillRect(p.x + p.r + 4, p.y - 5, 40 * pr, 10);
       }
-      g.fillStyle = isChosen ? '#ffd166' : '#cfd5ef';
+      g.fillStyle = isChosen ? '#f2b84b' : '#cfd5ef';
       const lab = this.outputLabel(j);
-      g.fillText(lab.length > 17 ? lab.slice(0, 16) + '…' : lab, p.x + p.r + (pr !== null ? 48 : 5), p.y + 3);
+      const x0 = p.x + p.r + (pr !== null ? 48 : 5);
+      const maxC = Math.max(6, Math.floor((W - x0 - 4) / 5.6));
+      g.fillText(lab.length > maxC ? lab.slice(0, maxC - 1) + '…' : lab, x0, p.y + 3);
     });
     // layer captions
     g.textAlign = 'center';
-    g.fillStyle = '#6b7399';
+    g.fillStyle = '#5f687d';
+    const spacing = nL > 1 && this.pos[1][0] && this.pos[0][0] ? this.pos[1][0].x - this.pos[0][0].x : 999;
     this.pos.forEach((col, l) => {
       if (!col.length) return;
-      const name = l === 0 ? `${col.length} inputs` : l === nL - 1 ? `${col.length} outputs` : `${col.length} × ${b.net.layers[l - 1].act}`;
-      g.fillText(name, col[0].x, H - 3);
+      const long = l === 0 ? `${col.length} inputs` : l === nL - 1 ? `${col.length} outputs` : `${col.length} × ${b.net.layers[l - 1].act}`;
+      const short = l === 0 ? `${col.length} in` : l === nL - 1 ? `${col.length} out` : String(col.length);
+      g.fillText(spacing < 78 ? short : long, col[0].x, H - 5);
     });
     if (this.value !== null && b.critic) {
       g.textAlign = 'right';
-      g.fillStyle = '#ffd166';
-      g.font = '800 11px Nunito';
+      g.fillStyle = '#f2b84b';
+      g.font = '700 11px Inter, sans-serif';
       g.fillText(`critic V(s) = ${fmt(this.value, 2)}`, W - 6, 12);
     }
   }

@@ -1,7 +1,7 @@
 /** 🧠 Brain tab: the network graph, weight matrices and histograms. */
 import type { Brain } from '../ml/algos/common.ts';
 import { NetViz } from './netviz.ts';
-import { clear, fmt, h } from './dom.ts';
+import { clear, fmt, h, section, seg } from './dom.ts';
 
 export class BrainPanel {
   readonly el: HTMLElement;
@@ -13,38 +13,30 @@ export class BrainPanel {
   private lastDetail = 0;
 
   constructor() {
-    this.stats = h('div', { class: 'small muted' });
+    this.stats = h('div', { class: 'note' });
     this.hists = h('div', { class: 'grid2' });
     this.matrices = h('div', { class: 'matrix-wrap' });
-    const modeSeg = h(
-      'div',
-      { class: 'seg' },
-      h('button', { class: 'on', onclick: (e: Event) => this.setMode('flow', e) }, '⚡ live signal'),
-      h('button', { onclick: (e: Event) => this.setMode('weights', e) }, '⚖️ weights'),
+    const mode = seg(
+      [
+        { value: 'flow', label: 'live signal', title: 'weight × activation: what actually flows through the network right now' },
+        { value: 'weights', label: 'weights', title: 'the raw weights' },
+      ],
+      (v) => {
+        this.viz.edgeMode = v;
+        mode.set(v);
+        this.viz.draw(true);
+      },
+      'sm',
     );
+    mode.set('flow');
     this.el = h(
       'div',
       null,
-      h(
-        'div',
-        { class: 'section' },
-        h('h3', null, '🧠 The neural network', h('span', { class: 'grow' }), modeSeg),
-        this.viz.el,
-        h('div', { class: 'small muted', style: { margin: '6px 0' } }, 'Blue = positive, orange = negative. "Live signal" shows weight × activation: the numbers actually flowing through the network as the robot thinks. Neuron colour = activation (yellow positive, blue negative).'),
-        this.stats,
-      ),
-      h('div', { class: 'section' }, h('h3', null, '🔬 Neuron inspector'), this.viz.detailEl),
-      h('div', { class: 'section' }, h('h3', null, '🧮 Weight matrices'), h('div', { class: 'small muted', style: { marginBottom: '6px' } }, 'Each layer is just a grid of numbers W (rows = neurons, columns = inputs). This is literally what gets exported.'), this.matrices),
-      h('div', { class: 'section' }, h('h3', null, '📊 Weight distributions'), this.hists),
+      section('The neural network', 'brain', [this.viz.el, h('div', { class: 'note' }, 'Blue = positive, orange = negative. "Live signal" shows weight × activation: the numbers actually flowing through the network as the robot thinks. Neuron colour = activation (yellow positive, blue negative). Click a neuron.'), this.stats], [mode.el]),
+      section('Neuron inspector', 'search', [this.viz.detailEl]),
+      section('Weight matrices', 'scan', [h('div', { class: 'note', style: { margin: '0 0 8px' } }, 'Each layer is just a grid of numbers W (rows = neurons, columns = inputs). This is literally what gets exported.'), this.matrices]),
+      section('Weight distributions', 'chart', [this.hists]),
     );
-  }
-
-  private setMode(m: 'flow' | 'weights', e: Event): void {
-    this.viz.edgeMode = m;
-    const seg = (e.target as HTMLElement).parentElement!;
-    seg.querySelectorAll('button').forEach((b) => b.classList.remove('on'));
-    (e.target as HTMLElement).classList.add('on');
-    this.viz.draw(true);
   }
 
   setBrain(b: Brain | null): void {
@@ -80,9 +72,9 @@ export class BrainPanel {
         h(
           'div',
           { class: 'card' },
-          h('div', { class: 'small' }, h('b', null, `Layer ${i + 1}`), ` ${l.inSize}→${l.outSize}`),
+          h('div', { class: 'small' }, h('b', null, `Layer ${i + 1}`), h('span', { class: 'muted' }, ` ${l.inSize}→${l.outSize} · ${l.act}`)),
           h('div', { class: 'hist' }, ...bins.map((c) => h('i', { style: { height: `${(c / peak) * 100}%` } }))),
-          h('div', { class: 'small muted mono' }, `μ=${fmt(mean, 3)} σ=${fmt(sd, 3)} [${fmt(mn, 2)}, ${fmt(mx, 2)}]`),
+          h('div', { class: 'tiny muted mono' }, `μ=${fmt(mean, 3)} σ=${fmt(sd, 3)} [${fmt(mn, 2)}, ${fmt(mx, 2)}]`),
         ),
       );
       // matrix heat map

@@ -1,4 +1,4 @@
-/** 📚 Learn tab: a compact field guide to the ideas behind the studio. */
+/** 📚 Learn: a compact field guide to the ideas behind the studio (shown in a dialog). */
 import { h } from './dom.ts';
 
 const CONCEPTS: [string, string, string][] = [
@@ -28,39 +28,36 @@ const CONCEPTS: [string, string, string][] = [
   ['🧑‍🏫 Imitation learning', 'Supervised learning on demonstrations: copy what an expert (you!) did. Fast to learn, but the copy only knows situations it has seen. Real robots are often pre-trained by imitation, then improved with RL.', 'Mission "Teach by Example".'],
   ['🧬 Neuroevolution', 'Optimise the weights with a genetic algorithm instead of gradients: evaluate a population, keep the best, mutate. Simple and parallel; used by OpenAI and Uber AI on control tasks.', 'Mission "Reach the Flag by Evolution".'],
   ['🎓 Overfitting & generalisation', 'A brain that memorised one exact situation fails in others. Randomising spawn points and targets (🎲 scatter) forces general skills.', 'Turn off scattering and see how a trained robot handles a moved flag.'],
+  ['🕘 Memory (frame stacking)', 'A plain network only sees the present moment. Feeding it the last few observations too ("remember the last 3 moments") lets it feel motion and remember things that just went out of view. The classic Atari DQN stacked 4 frames.', '👁️ Senses block "remember the last … moments", or sense.memory(3) in code.'],
+  ['📉 Learning-rate schedules', 'Big steps early to learn fast, small careful steps later to fine-tune: decaying the learning rate (linearly or with a cosine curve) often gives a better final brain. The entropy bonus can be decayed the same way: explore early, exploit later.', 'Training block → advanced → "learning rate decays…".'],
+  ['🧪 Evaluation vs training', 'Training curves include exploration noise and a brain that changes every update. To know how good a brain REALLY is, freeze it and test it on fresh episodes: that is evaluation, the RL version of a test set.', '📈 Training tab → Evaluate.'],
+  ['🔬 Experiments & hyperparameters', 'Learning rate, γ, network size… are hyperparameters: choices the algorithm cannot learn by itself. Researchers compare them with sweeps: the same task trained several times with one setting changed (and several random seeds, because RL is noisy).', '🧪 Experiments tab.'],
+  ['🧾 Reward breakdown', 'When several rewards add up, it is hard to tell which one the robot is chasing. Splitting the episode reward by source shows it: if a shaping reward keeps growing while the goal reward does not, the robot found a loophole.', '📈 Training tab → "Where does the reward come from?".'],
+  ['⌨️ Code mode', 'Everything the blocks do, as JavaScript, plus more: your own senses, rewards computed with any maths, levels built from code, every hyperparameter. Blocks convert to code with one click, so you can start visual and go textual when you are ready.', 'Editor → Code. Ctrl+Space for suggestions, 📖 for the reference.'],
   ['💾 What are "weights", really?', 'Just numbers: a grid W and a list b for every layer. Export them (JSON, ONNX, PyTorch) and any program can run your robot\'s brain: Python, Unity, a microcontroller…', '🧠 Brain tab → weight matrices; File → Export brain.'],
 ];
 
 export class LearnPanel {
   readonly el: HTMLElement;
-  constructor(openMissions: () => void) {
+  constructor(openMissions: () => void, openLab: () => void) {
+    const path: [string, (() => void) | null][] = [
+      ['Neuron Lab (top bar): see a network learn to separate dots, the basics of all ML.', openLab],
+      ['Mission "First Steps": press Train and watch the reward curve rise.', openMissions],
+      ['Open the Brain tab while it drives; click neurons.', null],
+      ['Same task with Evolution and DQN: compare the dashed curves.', null],
+      ['"Teach by Example": supervised learning from your own driving.', null],
+      ['Coins, Forest, Lava: senses & penalties.', null],
+      ['Soccer, Race, Maze: reward design for real.', null],
+      ['Experiments tab: sweep the learning rate, see why hyperparameters matter.', null],
+      ['Switch the editor to Code: write your own rewards, senses and levels, then export the brain.', null],
+    ];
     this.el = h(
       'div',
       null,
-      h(
-        'div',
-        { class: 'section' },
-        h('h3', null, '🗺️ Suggested path'),
-        h(
-          'div',
-          { class: 'card small', style: { lineHeight: '1.6' } },
-          h('div', null, '0️⃣ 🧪 Lab (top bar): see a network learn to separate dots, the basics of all ML.'),
-          h('div', null, '1️⃣ 🚩 First Steps → watch the reward curve rise.'),
-          h('div', null, '2️⃣ Open 🧠 Brain while it drives; click neurons.'),
-          h('div', null, '3️⃣ Same task with 🧬 Evolution and 🎯 DQN: compare the dashed curves.'),
-          h('div', null, '4️⃣ 🎮 Teach by Example: supervised learning.'),
-          h('div', null, '5️⃣ 🪙 Coins, 🌲 Forest, 🌋 Lava: senses & penalties.'),
-          h('div', null, '6️⃣ ⚽ Soccer, 🏎️ Race, 🌀 Maze: reward design for real.'),
-          h('div', null, '7️⃣ ✏️ Blank Canvas: invent your own task, export the brain.'),
-          h('button', { class: 'btn small accent', style: { marginTop: '8px' }, onclick: openMissions }, '🎯 Open missions'),
-        ),
-      ),
-      h(
-        'div',
-        { class: 'section' },
-        h('h3', null, '📖 Concepts'),
-        h('div', { class: 'concepts' }, ...CONCEPTS.map(([t, p, see]) => h('details', { class: 'concept' }, h('summary', null, t), h('p', null, p), h('div', { class: 'see' }, '👉 ', see)))),
-      ),
+      h('h3', { class: 'h-sub', style: { marginTop: '0' } }, 'Suggested path'),
+      h('ol', { class: 'path-list' }, ...path.map(([t, go]) => h('li', null, go ? h('a', { href: '#', onclick: (e: Event) => (e.preventDefault(), go()) }, t) : t))),
+      h('h3', { class: 'h-sub' }, 'Concepts'),
+      h('div', { class: 'concepts' }, ...CONCEPTS.map(([t, p, see]) => h('details', { class: 'concept' }, h('summary', null, t), h('p', null, p), h('div', { class: 'see' }, see)))),
     );
   }
 }

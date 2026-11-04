@@ -3,13 +3,13 @@ import type { BrainSnapshot } from '../ml/algos/common.ts';
 import type { ObsLayout } from '../sim/env.ts';
 import type { AgentSpec } from '../sim/types.ts';
 import { pytorchModelCode } from '../export/pytorch.ts';
-import { clear, escapeHtml, h, toast } from './dom.ts';
+import { btn, clear, escapeHtml, h, section, toast } from './dom.ts';
 
 function highlight(code: string, lang: 'js' | 'py' | 'json'): string {
   const kw =
     lang === 'py'
       ? /\b(import|from|class|def|return|self|super|with|as|for|in|if|else|elif|not|and|or|None|True|False|try|except|lambda)\b/g
-      : /\b(function|var|let|const|return|if|else|for|while|new|true|false|null|this)\b/g;
+      : /\b(function|var|let|const|return|if|else|for|while|new|true|false|null|this|of|in)\b/g;
   let s = escapeHtml(code);
   // order matters: comments & strings first (protect them with placeholders)
   const keep: string[] = [];
@@ -38,53 +38,36 @@ export class CodePanel {
 
   private block(title: string, help: string, code: string, lang: 'js' | 'py' | 'json'): HTMLElement {
     const pre = h('pre', { class: 'code', html: highlight(code, lang) });
-    return h(
-      'div',
-      { class: 'section' },
-      h(
-        'h3',
-        null,
-        title,
-        h('span', { class: 'grow' }),
-        h(
-          'button',
-          {
-            class: 'btn tiny',
-            onclick: () => {
-              navigator.clipboard?.writeText(code).then(
-                () => toast('Copied to clipboard 📋'),
-                () => toast('Copy failed: select the text manually'),
-              );
-            },
-          },
-          '📋 copy',
-        ),
-      ),
-      h('div', { class: 'small muted', style: { marginBottom: '6px' } }, help),
-      pre,
-    );
+    const copy = btn({
+      icon: 'copy',
+      label: 'Copy',
+      cls: 'xs ghost',
+      onclick: () => {
+        navigator.clipboard?.writeText(code).then(
+          () => toast('Copied to the clipboard', 2000, 'copy'),
+          () => toast('Copy failed: select the text manually'),
+        );
+      },
+    });
+    return section(title, null, [h('div', { class: 'note', style: { margin: '0 0 8px' } }, help), pre], [copy]);
   }
 
-  update(spec: AgentSpec | null, layout: ObsLayout | null, snap: BrainSnapshot | null): void {
+  update(spec: AgentSpec | null, layout: ObsLayout | null, snap: BrainSnapshot | null, program: string | null = null): void {
     clear(this.body);
     if (!spec) {
-      this.body.append(h('div', { class: 'muted' }, 'Fix the errors in your blocks to see the generated code.'));
+      this.body.append(h('div', { class: 'note' }, 'Fix the errors in your program to see the generated code.'));
       return;
     }
-    this.body.append(
-      this.block(
-        '⚡ Your event blocks → JavaScript',
-        'This is the code your reward & event blocks compile to. It runs inside every training world, 20 times per second. "api" is the bridge to the simulation (see src/sim/env.ts → ScriptAPI).',
-        spec.script,
-        'js',
-      ),
-    );
-    if (snap) this.body.append(this.block('🐍 The brain as PyTorch', 'The same network written for PyTorch, the most popular ML library. Export → "PyTorch script" gives you this file WITH the trained weights.', pytorchModelCode(snap), 'py'));
+    if (spec.source !== 'code' && program)
+      this.body.append(this.block('Your blocks as a code program', 'Exactly the same robot, written for code mode. Switch the editor to Code to edit it as text: every setting is spelled out.', program, 'js'));
+    if (spec.source !== 'code')
+      this.body.append(this.block('What runs in every world', 'The event blocks compile to this JavaScript. It runs inside every training world, 20 times per second. "api" is the bridge to the simulation (src/sim/env.ts → ScriptAPI).', spec.script, 'js'));
+    if (snap) this.body.append(this.block('The brain as PyTorch', 'The same network written for PyTorch, the most popular ML library. Export → "PyTorch script" gives you this file WITH the trained weights.', pytorchModelCode(snap), 'py'));
     if (layout) {
       const rows = layout.labels.map((l, i) => `x[${String(i).padStart(2)}]  ${l}`).join('\n');
-      this.body.append(this.block('🔢 Input vector layout', 'The exact order of the numbers fed into the network (the "observation"). Exported brains expect inputs in this order.', rows, 'js'));
+      this.body.append(this.block('Input vector layout', 'The exact order of the numbers fed into the network (the "observation"). Exported brains expect inputs in this order.', rows, 'js'));
     }
     const { script: _script, ...rest } = spec;
-    this.body.append(this.block('📦 Compiled spec (JSON)', 'Everything the blocks configure, as data. This is what is sent to the training worker.', JSON.stringify(rest, null, 2), 'json'));
+    this.body.append(this.block('Compiled spec (JSON)', 'Everything the program configures, as data. This is what is sent to the training worker.', JSON.stringify(rest, (_k, v) => (typeof v === 'number' && !Number.isFinite(v) ? null : v), 2), 'json'));
   }
 }
