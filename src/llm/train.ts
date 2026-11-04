@@ -144,15 +144,22 @@ export class LLMTrainer {
     return { x: this.x, y: this.y, B, T: this.model.cfg.ctx };
   }
 
-  /** One optimiser step on one random batch. */
+  /**
+   * One optimiser step on one random batch, the heart of training:
+   *   1. pick B random windows of text (x) and the same windows shifted by one token (y = what comes next)
+   *   2. forward: the model's scores for the next token at every position
+   *   3. loss: how wrong those scores were, and its gradient w.r.t. the scores
+   *   4. backward: the gradient for every weight (chain rule, gpt.ts)
+   *   5. update: move every weight a small step downhill (applyUpdate)
+   */
   trainStep(): { loss: number; gradNorm: number; lr: number } {
     const model = this.model;
-    const { x, y, B, T } = this.sampleBatch();
-    model.forward(x, B, T);
-    const loss = model.lossAndGrad(y);
+    const { x, y, B, T } = this.sampleBatch(); // 1
+    model.forward(x, B, T); // 2
+    const loss = model.lossAndGrad(y); // 3
     model.zeroGrad();
-    model.backward();
-    return this.applyUpdate(loss, B * T);
+    model.backward(); // 4
+    return this.applyUpdate(loss, B * T); // 5
   }
 
   /**
@@ -161,13 +168,14 @@ export class LLMTrainer {
    */
   applyUpdate(loss: number, tokens: number): { loss: number; gradNorm: number; lr: number } {
     const model = this.model;
-    // gradient clipping by global norm
+    // gradient clipping by global norm: the "length" of the whole gradient is √(Σ g²);
+    // if it is longer than cfg.clip (a surprising batch), shrink every gradient by the same factor
     let sq = 0;
     for (const p of model.params) for (let i = 0; i < p.g.length; i++) sq += p.g[i] * p.g[i];
     const norm = Math.sqrt(sq);
     const clip = this.cfg.clip > 0 && norm > this.cfg.clip ? this.cfg.clip / (norm + 1e-6) : 1;
-    // AdamW
-    const lr = this.lrAt(this.step);
+    // AdamW: Adam (see ../ml/optim.ts for the idea) with decoupled weight decay
+    const lr = this.lrAt(this.step); // learning rate for this step (warm-up, then cosine decay)
     const t = this.step + 1;
     const b1 = this.beta1;
     const b2 = this.beta2;
@@ -175,15 +183,17 @@ export class LLMTrainer {
     const bc2 = 1 - Math.pow(b2, t);
     const wd = this.cfg.weightDecay;
     model.params.forEach((p, k) => {
-      const m = this.m[k];
-      const v = this.v[k];
+      const m = this.m[k]; // running average of the gradient (direction)
+      const v = this.v[k]; // running average of the squared gradient (typical size)
       const w = p.w;
       const g = p.g;
-      const decay = p.decay ? wd : 0;
+      const decay = p.decay ? wd : 0; // weight decay only for matrices, not biases / LayerNorm gains
       for (let i = 0; i < w.length; i++) {
         const gi = g[i] * clip;
         m[i] = b1 * m[i] + (1 - b1) * gi;
         v[i] = b2 * v[i] + (1 - b2) * gi * gi;
+        // Adam step + weight decay: also shrink every weight a tiny bit towards 0, which keeps
+        // weights small unless the data really needs them big (a mild guard against memorising)
         w[i] -= lr * ((m[i] / bc1) / (Math.sqrt(v[i] / bc2) + 1e-8) + decay * w[i]);
       }
     });

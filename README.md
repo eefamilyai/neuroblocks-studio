@@ -218,6 +218,16 @@ code (JavaScript) ┘              │                │                       
 
 Physics runs at 60 Hz and the brain decides at 20 Hz (every 3 physics ticks) by default, like most robot-learning setups.
 
+### Reading the ML code
+
+The files where the weights do their work are commented line by line for study, in plain language, with small worked examples. A good order:
+
+1. [`src/ml/nn.ts`](src/ml/nn.ts): the robot's brain. How numbers flow through the weights (weighted sum + activation, layer by layer), how `backward` uses the chain rule to get every weight's gradient, and the fast matrix loops.
+2. [`src/ml/optim.ts`](src/ml/optim.ts): how gradients become weight updates (SGD, momentum, RMSProp, Adam).
+3. [`src/ml/algos/ppo.ts`](src/ml/algos/ppo.ts): how the robot's experience (rewards) turns into the gradients that train the brain.
+4. [`src/llm/gpt.ts`](src/llm/gpt.ts): the language model. Embeddings, causal self-attention, LayerNorm, the MLP, the cross-entropy loss, and every backward step.
+5. [`src/llm/train.ts`](src/llm/train.ts) and [`src/llm/decode.ts`](src/llm/decode.ts): one training step (batch → forward → loss → backward → AdamW), and generating text one token at a time.
+
 ### Performance
 
 - **Training** runs in a background worker. The first mission trains at roughly 15,000 environment steps per second on our test machine (about 2.5× faster than the first version), bigger networks proportionally slower.
